@@ -223,7 +223,7 @@
           </sizepolicy>
          </property>
          <property name="text">
-          <string>Elbow Thickness</string>
+          <string>Knee Thickness</string>
          </property>
         </widget>
        </item>
@@ -262,7 +262,7 @@
      </item>
     </layout>
    </widget>
-   <widget class="QWidget" name="">
+   <widget class="QWidget" name="layoutWidget">
     <property name="geometry">
      <rect>
       <x>10</x>
@@ -285,9 +285,7 @@
     </layout>
    </widget>
    <zorder>layoutWidget</zorder>
-   <zorder></zorder>
-   <zorder>squashStretchProfile_pushButton</zorder>
-   <zorder></zorder>
+   <zorder>layoutWidget</zorder>
   </widget>
   <widget class="QGroupBox" name="upvRefArray_groupBox">
    <property name="geometry">

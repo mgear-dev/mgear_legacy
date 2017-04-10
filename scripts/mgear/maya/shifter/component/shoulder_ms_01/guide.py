@@ -24,9 +24,9 @@
 # Author:     Miquel Campos         hello@miquel-campos.com  www.miquel-campos.com
 # Date:       2016 / 10 / 10
 
-#############################################
+##########################################################
 # GLOBAL
-#############################################
+##########################################################
 from functools import partial
 # pyMel
 import pymel.core as pm
@@ -35,6 +35,7 @@ import pymel.core as pm
 from mgear.maya.shifter.component.guide import ComponentGuide
 import mgear.maya.transform as tra
 
+
 #Pyside
 from mgear.maya.shifter.component.guide import componentMainSettings
 import mgear.maya.pyqt as gqt
@@ -42,16 +43,15 @@ from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 from maya.app.general.mayaMixin import MayaQDockWidget
 import maya.OpenMayaUI as omui
 QtGui, QtCore, QtWidgets, wrapInstance = gqt.qt_import()
-import settingsUI as sui
 
 # guide info
-AUTHOR = "Jeremie Passerin, Miquel Campos"
-URL = "www.jeremiepasserin.com, www.miquel-campos.com"
-EMAIL = "geerem@hotmail.com, hello@miquel-campos.com"
+AUTHOR = "Jeremie Passerin, Miquel Campos,Miles Cheng"
+URL = "www.jeremiepasserin.com, www.miquletd.com"
+EMAIL = "geerem@hotmail.com, hello@miquel-campos.com,milesckt@gmail.com"
 VERSION = [1,0,0]
-TYPE = "foot_bk_01"
-NAME = "foot"
-DESCRIPTION = "Foot with reversed controllers to control foot roll."
+TYPE = "shoulder_ms_01"
+NAME = "shoulder"
+DESCRIPTION = "shoulder / limb connector use in conjuction with ms_arm/leg "
 
 ##########################################################
 # CLASS
@@ -67,14 +67,13 @@ class Guide(ComponentGuide):
     email = EMAIL
     version = VERSION
 
-    connectors = ["leg_2jnt_01", "leg_ms_2jnt_01", "leg_3jnt_01"]
 
     # =====================================================
     ##
     # @param self
     def postInit(self):
-        self.save_transform = ["root", "#_loc", "heel", "outpivot", "inpivot"]
-        self.addMinMax("#_loc", 1, -1)
+        self.save_transform = ["root", "tip"]
+        self.save_blade = ["blade"]
 
     # =====================================================
     ## Add more object to the object definition list.
@@ -82,42 +81,34 @@ class Guide(ComponentGuide):
     def addObjects(self):
 
         self.root = self.addRoot()
-        self.locs = self.addLocMulti("#_loc", self.root)
+        vTemp = tra.getOffsetPosition( self.root, [2,0,0])
+        self.loc = self.addLoc("tip", self.root, vTemp)
+        self.blade = self.addBlade("blade", self.root, self.loc)
 
-        centers = [self.root]
-        centers.extend(self.locs)
+        centers = [self.root, self.loc]
         self.dispcrv = self.addDispCurve("crv", centers)
 
-        # Heel and pivots
-        vTemp = tra.getOffsetPosition( self.root, [0,-1,-1])
-        self.heel = self.addLoc("heel", self.root, vTemp)
-        vTemp = tra.getOffsetPosition( self.root, [1,-1,-1])
-        self.outpivot = self.addLoc("outpivot", self.root, vTemp)
-        vTemp = tra.getOffsetPosition( self.root, [-1,-1,-1])
-        self.inpivot = self.addLoc("inpivot", self.root, vTemp)
 
-        self.dispcrv = self.addDispCurve("1", [self.root, self.heel, self.outpivot, self.heel, self.inpivot])
 
     # =====================================================
     ## Add more parameter to the parameter definition list.
     # @param self
     def addParameters(self):
 
-        # self.pRoll = self.addParam("roll", "long", 0, 0, 1)
-        self.pRoll       = self.addParam("useRollCtl", "bool", True)
-        self.pUseIndex       = self.addParam("useIndex", "bool", False)
+        # self.pRefArray  = self.addParam("refArray", "string", "")
+        self.pUseIndex = self.addParam("useIndex", "bool", False)
         self.pParentJointIndex = self.addParam("parentJointIndex", "long", -1, None, None)
 
-
+       
 ##########################################################
 # Setting Page
 ##########################################################
 
-class settingsTab(QtWidgets.QDialog, sui.Ui_Form):
+# class settingsTab(QtWidgets.QDialog, sui.Ui_Form):
 
-    def __init__(self, parent=None):
-        super(settingsTab, self).__init__(parent)
-        self.setupUi(self)
+#     def __init__(self, parent=None):
+#         super(settingsTab, self).__init__(parent)
+#         self.setupUi(self)
 
 
 class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
@@ -128,7 +119,7 @@ class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
         gqt.deleteInstances(self, MayaQDockWidget)
 
         super(self.__class__, self).__init__(parent = parent)
-        self.settingsTab = settingsTab()
+        # self.settingsTab = settingsTab()
 
 
         self.setup_componentSettingWindow()
@@ -154,24 +145,7 @@ class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
         Populate the controls values from the custom attributes of the component.
 
         """
-        #populate tab
-        self.tabs.insertTab(1, self.settingsTab, "Component Settings")
-
-        #populate component settings
-        self.populateCheck(self.settingsTab.useRollCtl_checkBox, "useRollCtl")
-
-        #populate connections in main settings
-        for cnx in Guide.connectors:
-            self.mainSettingsTab.connector_comboBox.addItem(cnx)
-        self.connector_items = [ self.mainSettingsTab.connector_comboBox.itemText(i) for i in range( self.mainSettingsTab.connector_comboBox.count())]
-        currentConnector = self.root.attr("connector").get()
-        if currentConnector not in self.connector_items:
-            self.mainSettingsTab.connector_comboBox.addItem(currentConnector)
-            self.connector_items.append(currentConnector)
-            pm.displayWarning("The current connector: %s, is not a valid connector for this component. Build will Fail!!")
-        comboIndex = self.connector_items.index(currentConnector)
-        self.mainSettingsTab.connector_comboBox.setCurrentIndex(comboIndex)
-
+        return
 
     def create_componentLayout(self):
 
@@ -182,10 +156,7 @@ class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
         self.setLayout(self.settings_layout)
 
     def create_componentConnections(self):
-
-        self.settingsTab.useRollCtl_checkBox.stateChanged.connect(partial(self.updateCheck, self.settingsTab.useRollCtl_checkBox, "neutralpose"))
-        self.mainSettingsTab.connector_comboBox.currentIndexChanged.connect(partial(self.updateConnector, self.mainSettingsTab.connector_comboBox, self.connector_items) )
-
+        return
 
     def dockCloseEventTriggered(self):
         gqt.deleteInstances(self, MayaQDockWidget)

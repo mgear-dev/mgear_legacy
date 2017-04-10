@@ -48,10 +48,10 @@ import settingsUI as sui
 AUTHOR = "Jeremie Passerin, Miquel Campos, Miles Cheng"
 URL = "www.jeremiepasserin.com, www.miquletd.com"
 EMAIL = "geerem@hotmail.com, hello@miquel-campos.com , miles@simage.com.hk"
-VERSION = [1,3,0]
-TYPE = "arm_ms_2jnt_01"
-NAME = "arm"
-DESCRIPTION = "2 bones arm with Maya nodes for roll bones + Simage specification"
+VERSION = [1,0,0]
+TYPE = "leg_ms_2jnt_01"
+NAME = "leg"
+DESCRIPTION = "2 bones leg with Maya nodes for roll bones + Simage specification"
 
 ##########################################################
 # CLASS
@@ -71,7 +71,7 @@ class Guide(ComponentGuide):
     ##
     # @param self
     def postInit(self):
-        self.save_transform = ["root", "elbow", "wrist", "eff"]
+        self.save_transform = ["root", "knee", "ankle", "eff"]
 
     # =====================================================
     ## Add more object to the object definition list.
@@ -80,14 +80,15 @@ class Guide(ComponentGuide):
 
         self.root = self.addRoot()
 
-        vTemp = tra.getOffsetPosition( self.root, [3,0,-.01])
-        self.elbow = self.addLoc("elbow", self.root, vTemp)
-        vTemp = tra.getOffsetPosition( self.root, [6,0,0])
-        self.wrist = self.addLoc("wrist", self.elbow, vTemp)
-        vTemp = tra.getOffsetPosition( self.root, [7,0,0])
-        self.eff = self.addLoc("eff", self.wrist, vTemp)
+        vTemp = tra.getOffsetPosition( self.root, [0,-3,0.1])
+        self.knee = self.addLoc("knee", self.root, vTemp)
+        vTemp = tra.getOffsetPosition( self.root, [0,-6,0])
+        self.ankle = self.addLoc("ankle", self.knee, vTemp)
+        vTemp = tra.getOffsetPosition( self.root, [0,-6,0.5])
+        self.eff = self.addLoc("eff", self.ankle, vTemp)
 
-        self.dispcrv = self.addDispCurve("crv", [self.root, self.elbow, self.wrist, self.eff])
+        centers = [self.root, self.knee, self.ankle, self.eff]
+        self.dispcrv = self.addDispCurve("crv", centers)
 
     # =====================================================
     ## Add more parameter to the parameter definition list.
@@ -95,12 +96,12 @@ class Guide(ComponentGuide):
     def addParameters(self):
 
         # Default Values
-        self.pBlend       = self.addParam("blend", "double", 0, 0, 1)
+        self.pBlend       = self.addParam("blend", "double", 1, 0, 1)
         self.pFkRefArray  = self.addParam("fkrefarray", "string", "")
         self.pIkRefArray  = self.addParam("ikrefarray", "string", "")
         self.pUpvRefArray = self.addParam("upvrefarray", "string", "")
         self.pMaxStretch  = self.addParam("maxstretch", "double", 2 , 1, None)
-        self.pElbowThickness = self.addParam("elbow","double",0,0,None)
+        self.pKneeThickness = self.addParam("knee","double",0,0,None)
         # Divisions
         self.pDiv0 = self.addParam("div0", "long", 3, 1, None)
         self.pDiv1 = self.addParam("div1", "long", 3, 1, None)
@@ -148,7 +149,7 @@ class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
         self.setObjectName(self.toolName)
         self.setWindowFlags(QtCore.Qt.Window)
         self.setWindowTitle(TYPE)
-        self.resize(280, 620)
+        self.resize(280, 780)
 
     def create_componentControls(self):
         return
@@ -166,7 +167,7 @@ class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
         self.settingsTab.ikfk_slider.setValue(int(self.root.attr("blend").get()*100))
         self.settingsTab.ikfk_spinBox.setValue(int(self.root.attr("blend").get()*100))
         self.settingsTab.maxStretch_spinBox.setValue(self.root.attr("maxstretch").get())
-        self.settingsTab.elbow_spinBox.setValue(self.root.attr("elbow").get())
+        self.settingsTab.knee_spinBox.setValue(self.root.attr("knee").get())
         self.settingsTab.div0_spinBox.setValue(self.root.attr("div0").get())
         self.settingsTab.div1_spinBox.setValue(self.root.attr("div1").get())
         
@@ -194,7 +195,7 @@ class componentSettings(MayaQWidgetDockableMixin, componentMainSettings):
         self.settingsTab.ikfk_slider.valueChanged.connect(partial(self.updateSlider, self.settingsTab.ikfk_slider, "blend"))
         self.settingsTab.ikfk_spinBox.valueChanged.connect(partial(self.updateSlider, self.settingsTab.ikfk_spinBox, "blend"))
         self.settingsTab.maxStretch_spinBox.valueChanged.connect(partial(self.updateSpinBox, self.settingsTab.maxStretch_spinBox, "maxstretch"))
-        self.settingsTab.elbow_spinBox.valueChanged.connect(partial(self.updateSpinBox, self.settingsTab.elbow_spinBox, "elbow"))
+        self.settingsTab.knee_spinBox.valueChanged.connect(partial(self.updateSpinBox, self.settingsTab.knee_spinBox, "knee"))
 
         self.settingsTab.div0_spinBox.valueChanged.connect(partial(self.updateSpinBox, self.settingsTab.div0_spinBox, "div0"))
         self.settingsTab.div1_spinBox.valueChanged.connect(partial(self.updateSpinBox, self.settingsTab.div1_spinBox, "div1"))
