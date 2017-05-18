@@ -199,6 +199,15 @@ class MainComponent(object):
         """
         # Root
         self.root = pri.addTransformFromPos(self.model, self.getName("root"), self.guide.pos["root"])
+        self.addToGroup( self.root, names=["componentsRoots"])
+
+        #infos
+        att.addAttribute(self.root, "componentType", "string", self.guide.compType)
+        att.addAttribute(self.root, "componentName", "string", self.guide.compName)
+        att.addAttribute(self.root, "componentVersion", "string", str(self.guide.version)[1:-1])
+        att.addAttribute(self.root, "componentAuthor", "string", self.guide.author)
+        att.addAttribute(self.root, "componentURL", "string", self.guide.url)
+        att.addAttribute(self.root, "componentEmail", "string", self.guide.email)
 
         # joint --------------------------------
         if self.options["joint_rig"]:
@@ -220,7 +229,7 @@ class MainComponent(object):
         """
         return
 
-    def addJoint(self, obj, name, newActiveJnt=None, UniScale=True):
+    def addJoint(self, obj, name, newActiveJnt=None, UniScale=True, segComp=0):
         """
         Add joint as child of the active joint or under driver object.
 
@@ -257,7 +266,7 @@ class MainComponent(object):
                 pm.connectAttr(dm_node+".outputScale", jnt+".s")
 
             # Segment scale compensate Off to avoid issues with the global scale
-            jnt.setAttr("segmentScaleCompensate", 0)
+            jnt.setAttr("segmentScaleCompensate", segComp)
 
             jnt.setAttr("jointOrient", 0, 0, 0)
 
@@ -330,11 +339,13 @@ class MainComponent(object):
 
         """
         fullName = self.getName(name)
-        if fullName in self.rig.guide.controllers.keys():
-            ctl_ref = self.rig.guide.controllers[fullName]
+        bufferName =  fullName+"_controlBuffer"
+        if bufferName in self.rig.guide.controllers.keys():
+            ctl_ref = self.rig.guide.controllers[bufferName]
             ctl = pri.addTransform(parent, fullName, m)
             for shape in ctl_ref.getShapes():
                 ctl.addChild(shape, shape=True, add=True)
+                pm.rename(shape, fullName+"Shape")
             ico.setcolor(ctl, color)
         else:
             ctl = ico.create(parent, fullName, m, color, icon, **kwargs)
@@ -707,7 +718,7 @@ class MainComponent(object):
             refArray (string): List of driver objects divided by ",". 
             cns_obj (dagNode): The driven object.
             upVAttr (bool): Set if the ref Array is for IK or Up vector
-            init_ref (list of dagNode):
+            init_ref (list of dagNode): Set the initial default ref connections
             skipTranslate (bool): if True will skip the translation connections
         """
 

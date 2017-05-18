@@ -43,3 +43,7 @@ excons.cache
 /.build/
 /release/
 /debug/
+/eco/
+/mgear.env.tmp
+/mgear.config
+/mGear_cmd.cmd

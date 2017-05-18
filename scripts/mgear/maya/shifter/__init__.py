@@ -33,6 +33,7 @@ Shifter base rig class.
 # GLOBAL
 #############################################
 # Built in
+import os.path
 import datetime
 import getpass
 
@@ -42,6 +43,7 @@ import pymel.core.datatypes as dt
 
 # mgear
 import mgear
+import mgear.maya.utils
 from mgear.maya.shifter.guide import RigGuide
 from mgear.maya.shifter.guide import helperSlots
 from mgear.maya.shifter.component import MainComponent
@@ -59,6 +61,36 @@ if not pm.pluginInfo("mgear_solvers", q=True, l=True):
         pm.displayError("You need the mgear_solvers plugin!")
 if not pm.pluginInfo("matrixNodes", q=True, l=True):
     pm.loadPlugin("matrixNodes")
+
+
+COMPONENT_PATH = os.path.join(os.path.dirname(__file__), "component")
+TEMPLATE_PATH = os.path.join(COMPONENT_PATH, "templates")
+SYNOPTIC_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, "synoptic","tabs"))
+
+SHIFTER_COMPONENT_ENV_KEY = "MGEAR_SHIFTER_COMPONENT_PATH"
+
+def getComponentDirectories():
+    return mgear.maya.utils.gatherCustomModuleDirectories(
+        SHIFTER_COMPONENT_ENV_KEY,
+        os.path.join(os.path.dirname(__file__), "component"))
+
+
+def importComponentGuide(comp_type):
+    dirs = getComponentDirectories()
+    defFmt = "mgear.maya.shifter.component.{}.guide"
+    customFmt = "{}.guide"
+
+    module = mgear.maya.utils.importFromStandardOrCustomDirectories(dirs, defFmt, customFmt, comp_type)
+    return module
+
+
+def importComponent(comp_type):
+    dirs = getComponentDirectories()
+    defFmt = "mgear.maya.shifter.component.{}"
+    customFmt = "{}"
+
+    module = mgear.maya.utils.importFromStandardOrCustomDirectories(dirs, defFmt, customFmt, comp_type)
+    return module
 
 
 ##########################################################
@@ -85,6 +117,8 @@ class Rig(object):
 
         self.components = {}
         self.componentsIndex = []
+
+        self.customStepDic = {}
 
     def buildFromSelection(self):
         """
@@ -118,20 +152,21 @@ class Rig(object):
         self.options = self.guide.values
         self.guides = self.guide.components
 
+        self.customStepDic["mgearRun"] = self
+
         self.preCustomStep()
         self.initialHierarchy()
         self.processComponents()
         self.finalize()
         self.postCustomStep()
-
         return self.model
 
     def customStep(self, checker, attr):
         if self.options[checker]:
             customSteps = self.options[attr].split(",")
             for step in customSteps:
-                helperSlots.runStep(step)
-    
+                helperSlots.runStep(step.split("|")[-1][1:], self.customStepDic)
+
     def preCustomStep(self):
         self.customStep("doPreCustomStep", "preCustomStep")
 
@@ -139,7 +174,6 @@ class Rig(object):
     def postCustomStep(self):
         self.customStep("doPostCustomStep", "postCustomStep")
 
-        
 
     def initialHierarchy(self):
         """
@@ -209,8 +243,7 @@ class Rig(object):
             guide = self.guides[comp]
             mgear.log("Init : "+ guide.fullName + " ("+guide.type+")")
 
-            module_name = "mgear.maya.shifter.component."+guide.type
-            module = __import__(module_name, globals(), locals(), ["*"], -1)
+            module = importComponent(guide.type)
             Component = getattr(module , "Component")
 
             component = Component(self, guide)
@@ -255,7 +288,6 @@ class Rig(object):
         masterSet = pm.sets(n=self.model.name()+"_sets_grp", em=True)
         pm.connectAttr(masterSet.message, self.model.rigGroups[groupIdx])
         groupIdx += 1
-        
 
         # Creating all groups
         pm.select(cl=True)
@@ -265,8 +297,6 @@ class Rig(object):
             pm.connectAttr(s.message, self.model.rigGroups[groupIdx])
             groupIdx += 1
             masterSet.add(s)
-
-
 
 
         # Bind pose ---------------------------------------
@@ -303,8 +333,9 @@ class Rig(object):
             dagNode: The Control.
 
         """
-        if name in self.guide.controllers.keys():
-            ctl_ref = self.guide.controllers[name]
+        bufferName =  name+"_controlBuffer"
+        if bufferName in self.guide.controllers.keys():
+            ctl_ref = self.guide.controllers[bufferName]
             ctl = pri.addTransform(parent, name, m)
             for shape in ctl_ref.getShapes():
                 ctl.addChild(shape, shape=True, add=True)
@@ -472,4 +503,3 @@ class Rig(object):
             self.components[comp_name].ui = pm.UIHost(self.components[comp_name].root)
 
         return self.components[comp_name].ui
-

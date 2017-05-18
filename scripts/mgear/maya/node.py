@@ -119,7 +119,7 @@ def createDistNode(objA, objB, output=None):
     pm.connectAttr(dm_nodeB+".outputTranslate", node+".point2")
 
     if output:
-        pm.connectAttr(node+".distance", destination)
+        pm.connectAttr(node+".distance", output)
 
     return node
 
@@ -458,13 +458,22 @@ def createMulDivNode(inputA, inputB, operation=1, output=None):
 
     for item, s in zip(inputA, "XYZ"):
         if isinstance(item, str) or isinstance(item, unicode) or isinstance(item, pm.Attribute):
-            pm.connectAttr(item, node+".input1"+s, f=True)
+            try:
+                pm.connectAttr(item, node+".input1"+s, f=True)
+            except RuntimeError:
+                pm.connectAttr(item, node+".input1", f=True)
+                break
+
         else:
             pm.setAttr(node+".input1"+s, item)
 
     for item, s in zip(inputB, "XYZ"):
         if isinstance(item, str) or isinstance(item, unicode) or isinstance(item, pm.Attribute):
-            pm.connectAttr(item, node+".input2"+s, f=True)
+            try:
+                pm.connectAttr(item, node+".input2"+s, f=True)
+            except RuntimeError:
+                pm.connectAttr(item, node+".input2", f=True)
+                break
         else:
             pm.setAttr(node+".input2"+s, item)
 
@@ -541,7 +550,10 @@ def createPlusMinusAverage1D(input, operation=1, output=None):
     node.attr("operation").set(operation)
 
     for i, x in enumerate(input):
-        pm.connectAttr(x, node+".input1D[%s]"%str(i))
+        try:
+            pm.connectAttr(x, node+".input1D[%s]"%str(i))
+        except:
+            pm.setAttr( node+".input1D[%s]"%str(i), x)
 
     if output:
         pm.connectAttr(node+".output1D", output)
