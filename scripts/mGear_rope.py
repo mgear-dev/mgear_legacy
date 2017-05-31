@@ -28,7 +28,7 @@ import pymel.core as pm
 
 
 import mgear.maya.applyop as aop
-import mGear_riggingTools as rt
+import mgear.maya.rigbits as rt
 
 
 def rope(DEF_nb=10, ropeName="rope",  keepRatio=False, lvlType="transform", oSel=None):
@@ -38,7 +38,7 @@ def rope(DEF_nb=10, ropeName="rope",  keepRatio=False, lvlType="transform", oSel
     Args:
         DEF_nb (int): Number of deformer joints.
         ropeName (str): Name for the rope rig.
-        keepRatio (bool): If True, the deformers will keep the length position when the curve is stretched. 
+        keepRatio (bool): If True, the deformers will keep the length position when the curve is stretched.
     """
     if oSel and len(oSel) == 2 and isinstance(oSel, list):
         oCrv = oSel[0]
@@ -141,4 +141,3 @@ def build_rope(*args):
         ropeName = pm.textField("RopeName", q=True, text=True)
         keepRatio = pm.checkBox("keepRatio", q=True, v=True)
         rope(DEF_nb, ropeName, keepRatio)
-
