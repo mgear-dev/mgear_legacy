@@ -360,10 +360,14 @@ def setDrivenNode(node, drivenNode, drivenAttrs):
         drivenNode (str): name of node to be driven
         drivenAttrs (list): of attributes to be driven by weightDriver
     """
+    attrs_dict = []
     for index, dAttr in enumerate(drivenAttrs):
         nodePlug = "{}.output[{}]".format(node, index)
         drivenPlug = "{}.{}".format(drivenNode, dAttr)
+        attrs_dict.append(dAttr)
+        attrs_dict.append(mc.getAttr(drivenPlug))
         mc.connectAttr(nodePlug, drivenPlug, f=True)
+    return attrs_dict
 
 
 def getDrivenNode(node):
@@ -435,8 +439,10 @@ def getDrivenNodeAttributes(node):
     """
     attributesToReturn = []
     drivenAttrs = getAttrInOrder(node, "output")
-    attributesToReturn = [attr.attrName(longName=True) for attr in drivenAttrs
-                          if attr.nodeName() != node]
+    for attr in drivenAttrs:
+        if attr.nodeName() != node:
+            attrName = attr.getAlias() or attr.attrName(longName=True)
+            attributesToReturn.append(attrName)
     return attributesToReturn
 
 
@@ -745,8 +751,17 @@ def createRBFFromInfo(weightNodeInfo_dict):
         transformNode, node = createRBF(weightNodeName,
                                         transformName=transformName)
         rbf_node.setSetupName(node.name(), setupName)
-        if drivenNodeName and drivenNodeName[0].endswith(DRIVEN_SUFFIX):
+        # create the driven group for the control
+        if (drivenNodeName and
+            drivenNodeName[0].endswith(DRIVEN_SUFFIX) and
+                drivenControlName):
             rbf_node.addDrivenGroup(drivenControlName)
+        elif (drivenNodeName and
+              drivenNodeName[0].endswith(DRIVEN_SUFFIX) and
+              mc.objExists(drivenNodeName[0].replace(DRIVEN_SUFFIX, ""))):
+            drivenControlName = drivenNodeName[0].replace(DRIVEN_SUFFIX, "")
+            rbf_node.addDrivenGroup(drivenControlName)
+
         rbf_node.createRBFToggleAttr(drivenControlName)
         rbf_node.setDriverControlAttr(node.name(), driverControl)
         setTransformNode(transformNode, transformNodeInfo)
@@ -862,17 +877,21 @@ class RBFNode(rbf_node.RBFNode):
         setDriverNode(self.name, driverNode, driverAttrs)
 
     def setDrivenNode(self, drivenNode, drivenAttrs, parent=True):
-        setDrivenNode(self.name, drivenNode, drivenAttrs)
+        attrs_dict = setDrivenNode(self.name, drivenNode, drivenAttrs)
         if parent:
             mc.parent(self.transformNode, drivenNode)
         if drivenNode.endswith(DRIVEN_SUFFIX):
             drivenControlName = drivenNode.replace(DRIVEN_SUFFIX, CTL_SUFFIX)
+            drivenOtherName = drivenNode.replace(DRIVEN_SUFFIX, "")
             if not mc.objExists(drivenControlName):
                 return
+            elif mc.objExists(drivenOtherName):
+                drivenControlName = drivenOtherName
             rbf_node.createRBFToggleAttr(drivenControlName)
             rbf_node.connectRBFToggleAttr(drivenControlName,
                                           self.name,
                                           self.getRBFToggleAttr())
+        return attrs_dict
 
     def copyPoses(self, nodeB):
         poseInfo = self.getDriverControlPoseAttr()

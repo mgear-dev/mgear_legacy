@@ -42,6 +42,8 @@ from mgear.maya.synoptic import utils
 # =============================================================================
 
 DRIVEN_SUFFIX = "_driven"
+DRIVEN_PAR_SUFFIX = "_drivenPar"
+RBF_LOCATOR_SUFFIX = "_rbfLoc"
 CTL_SUFFIX = "_ctl"
 TRANSFORM_SUFFIX = "_trfm"
 
@@ -119,19 +121,35 @@ def addDrivenGroup(node):
     Returns:
         str: of node created
     """
-    parentOfTarget = mc.listRelatives(node, p=True) or None
-    if not parentOfTarget:
-        return node
+    node = pm.PyNode(node)
+    parentOfTarget = pm.listRelatives(node, p=True) or None
+    if parentOfTarget:
+        parentOfTarget = parentOfTarget[0]
     if node.endswith(CTL_SUFFIX):
         drivenName = node.replace(CTL_SUFFIX, DRIVEN_SUFFIX)
     else:
         drivenName = "{}{}".format(node, DRIVEN_SUFFIX)
-    drivenName = mc.group(name=drivenName, p=parentOfTarget[0], em=True)
+
+    if parentOfTarget is None:
+        parentOfTarget = pm.group(name=drivenName.replace(DRIVEN_SUFFIX,
+                                                          DRIVEN_PAR_SUFFIX),
+                                  w=True,
+                                  em=True)
+
+    else:
+        parentOfTarget = pm.group(name=drivenName.replace(DRIVEN_SUFFIX,
+                                                          DRIVEN_PAR_SUFFIX),
+                                  p=parentOfTarget,
+                                  em=True)
+    parentOfTarget.setMatrix(node.getMatrix(worldSpace=True),
+                             worldSpace=True)
+    drivenName = pm.group(name=drivenName, p=parentOfTarget, em=True)
+
     attribute.add_mirror_config_channels(pm.PyNode(drivenName))
     if node.endswith(CTL_SUFFIX):
         copyInverseMirrorAttrs(node, drivenName)
-    mc.parent(node, drivenName)
-    return drivenName
+    pm.parent(node, drivenName)
+    return drivenName.name()
 
 
 def removeDrivenGroup(node):
@@ -140,7 +158,9 @@ def removeDrivenGroup(node):
     Args:
         node (str): name of node to check
     """
-    parentOfTarget = mc.listRelatives(node, p=True) or None
+    drivePar = parentOfTarget = mc.listRelatives(node, p=True) or None
+    if parentOfTarget and parentOfTarget[0].endswith(DRIVEN_PAR_SUFFIX):
+        parentOfTarget = mc.listRelatives(parentOfTarget, p=True) or None
     childrenNode = mc.listRelatives(node, type="transform") or []
 
     for child in childrenNode:
@@ -150,6 +170,39 @@ def removeDrivenGroup(node):
             mc.parent(child, parentOfTarget[0])
     if node.endswith(DRIVEN_SUFFIX):
         mc.delete(node)
+        if drivePar and drivePar[0].endswith(DRIVEN_PAR_SUFFIX):
+            mc.delete(drivePar)
+
+
+def compensateLocator(node):
+    """Create a locator that parents under desired node, to manipulated
+    directly connected nodes.
+    Functionality that is disable, but for future use.
+
+    Args:
+        node (str): desired node
+
+    Returns:
+        str: name of the created locator
+    """
+    mc.select(cl=True)
+    cLoc = mc.spaceLocator(n="{}{}".format(node, RBF_LOCATOR_SUFFIX))
+    mc.parent(cLoc, node, r=True)
+    return cLoc
+
+
+def removeCompensateLocator(node):
+    """remove the locator under the desired node if exists
+
+    Args:
+        node (str): name of the ndoe to look under.
+    """
+    mc.select(cl=True)
+    cmpLoc = "{}{}".format(node, RBF_LOCATOR_SUFFIX)
+    if mc.objExists(cmpLoc):
+        cmpLoc_par = mc.listRelatives(cmpLoc, p=True)
+        if cmpLoc_par and cmpLoc_par[0] == node:
+            mc.delete(cmpLoc)
 
 
 def decompMatrix(node, matrix):
@@ -205,9 +258,43 @@ def resetDrivenNodes(node):
     """
     children = mc.listRelatives(node, type="transform")
     controlNode = node.replace(DRIVEN_SUFFIX, CTL_SUFFIX)
-    if mc.objExists(controlNode) and controlNode in children:
+    otherNode = node.replace(DRIVEN_SUFFIX, "")
+    if mc.objExists(controlNode) and children and controlNode in children:
         transform.resetTransform(pm.PyNode(controlNode))
+    elif mc.objExists("{}{}".format(node, RBF_LOCATOR_SUFFIX)):
+        compoensateLoc = pm.PyNode("{}{}".format(node, RBF_LOCATOR_SUFFIX))
+        transform.resetTransform(compoensateLoc)
+    elif mc.objExists(otherNode):
+        otherNode = pm.PyNode(otherNode)
+        transform.resetTransform(otherNode)
     transform.resetTransform(pm.PyNode(node))
+
+
+def __getResultingMatrix(drivenNode, parentNode, absoluteWorld=True):
+    """convenience function, wrap. given two nodes, one parented under the
+    other
+
+    Args:
+        drivenNode (str): name of the drivenNode
+        parentNode (str): name of the parent node
+        absoluteWorld (bool, optional): calculate in world or check for local
+        differences
+
+    Returns:
+        mmaatrix: resulting matrix of driven and parent
+    """
+    drivenNode = pm.PyNode(drivenNode)
+    nodeInverParMat = parentNode.getAttr("parentInverseMatrix")
+    drivenMat = drivenNode.getMatrix(worldSpace=True)
+    drivenMat_local = drivenNode.getMatrix(objectSpace=True)
+    defaultMat = OpenMaya.MMatrix()
+
+    if defaultMat.isEquivalent(drivenMat_local) and not absoluteWorld:
+        totalMatrix = defaultMat
+        print "Pose recorded in local."
+    else:
+        totalMatrix = drivenMat * nodeInverParMat
+    return totalMatrix
 
 
 def getDrivenMatrix(node, absoluteWorld=True):
@@ -222,21 +309,23 @@ def getDrivenMatrix(node, absoluteWorld=True):
     Returns:
         MMatrix: of total position including the control
     """
-    children = mc.listRelatives(node, type="transform")
+    children = mc.listRelatives(node, type="transform") or []
     node = pm.PyNode(node)
     controlNode = node.replace(DRIVEN_SUFFIX, CTL_SUFFIX)
+    otherNode = node.replace(DRIVEN_SUFFIX, "")
     if mc.objExists(controlNode) and controlNode in children:
-        controlNode = pm.PyNode(controlNode)
+        totalMatrix = __getResultingMatrix(controlNode,
+                                           node,
+                                           absoluteWorld=absoluteWorld)
+    elif mc.objExists(otherNode) and otherNode in children:
+        totalMatrix = __getResultingMatrix(otherNode,
+                                           node,
+                                           absoluteWorld=absoluteWorld)
+    elif mc.objExists("{}{}".format(node, RBF_LOCATOR_SUFFIX)):
+        compoensateLoc = pm.PyNode("{}{}".format(node, RBF_LOCATOR_SUFFIX))
         nodeInverParMat = node.getAttr("parentInverseMatrix")
-        controlMat = controlNode.getMatrix(worldSpace=True)
-        controlMat_local = controlNode.getMatrix(objectSpace=True)
-        defaultMat = OpenMaya.MMatrix()
-
-        if defaultMat.isEquivalent(controlMat_local) and not absoluteWorld:
-            totalMatrix = defaultMat
-            print "Pose recorded in local."
-        else:
-            totalMatrix = controlMat * nodeInverParMat
+        controlMat = compoensateLoc.getMatrix(worldSpace=True)
+        totalMatrix = controlMat * nodeInverParMat
     else:
         totalMatrix = node.getMatrix(worldSpace=False)
 
@@ -794,11 +883,13 @@ class RBFNode(object):
         attributeValue_dict = {}
         drivenNode = self.getDrivenNode()[0]
         drivenAttrs = self.getDrivenNodeAttributes()
-        (trans,
-         rotate,
-         scale) = decompMatrix(drivenNode,
-                               getDrivenMatrix(drivenNode,
-                                               absoluteWorld=absoluteWorld))
+        if (mc.attributeQuery("matrix", n=drivenNode, ex=True) and
+                mc.attributeQuery("worldMatrix", n=drivenNode, ex=True)):
+            (trans,
+             rotate,
+             scale) = decompMatrix(drivenNode,
+                                   getDrivenMatrix(drivenNode,
+                                                   absoluteWorld=absoluteWorld))
         for attr in drivenAttrs:
             if attr in TRANSLATE_ATTRS:
                 index = TRANSLATE_ATTRS.index(attr)
@@ -881,3 +972,15 @@ class RBFNode(object):
         self.addPose(poseInput=poseInputs,
                      poseValue=newPoseValues,
                      posesIndex=posesIndex)
+
+    def compensateForDirectConnect(self):
+        drivenNode = self.getDrivenNode()[0]
+        if (mc.nodeType(drivenNode) not in ["transform", "joint"] or
+            mc.objExists("{}{}".format(drivenNode, RBF_LOCATOR_SUFFIX)) or
+            drivenNode.endswith(DRIVEN_SUFFIX)):
+            return
+        transformAttrs = set(TRANSLATE_ATTRS + ROTATE_ATTRS + SCALE_ATTRS)
+        drivenAttrs = set(self.getDrivenNodeAttributes())
+        if not drivenAttrs.intersection(transformAttrs):
+            return
+        cmpLoc = compensateLocator(drivenNode)
