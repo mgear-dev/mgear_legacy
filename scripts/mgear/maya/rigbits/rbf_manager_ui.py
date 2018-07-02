@@ -79,10 +79,6 @@ from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 import rbf_io
 import rbf_node
 
-# debug
-# reload(rbf_io)
-# reload(rbf_node)
-
 # =============================================================================
 # Constants
 # =============================================================================
@@ -128,12 +124,6 @@ def getPlugAttrs(nodes, attrType="all"):
     for node in nodes:
         if attrType == "all":
             attrs = mc.listAttr(node, se=True, u=False)
-            aliasAttrs = mc.aliasAttr(node, q=True)
-            if aliasAttrs is not None:
-                try:
-                    attrs.extend(aliasAttrs[0::2])
-                except Exception:
-                    pass
         elif attrType == "cb":
             attrs = mc.listAttr(node, se=True, u=False, cb=True)
         elif attrType == "keyable":
@@ -457,7 +447,6 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         self.genericWidgetHight = 24
         # class info ----------------------------------------------------------
         self.absWorld = True
-        self.zeroedDefaults = True
         self.currentRBFSetupNodes = []
         self.allSetupsInfo = None
         self.setMenuBar(self.createMenuBar(hideMenuBar=hideMenuBar))
@@ -659,8 +648,7 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         if not drivenAttrs:
             return
         parentNode = False
-        drivenType = mc.nodeType(drivenNode)
-        if drivenType in ["transform", "joint"]:
+        if mc.nodeType(drivenNode) == "transform":
             parentNode = True
             drivenNode = rbf_node.addDrivenGroup(drivenNode)
         # create RBFNode instance, apply settings
@@ -668,9 +656,7 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         rbfNode.setSetupName(setupName)
         rbfNode.setDriverControlAttr(driverControl)
         rbfNode.setDriverNode(driverNode, driverAttrs)
-        defaultVals = rbfNode.setDrivenNode(drivenNode,
-                                            drivenAttrs,
-                                            parent=parentNode)
+        rbfNode.setDrivenNode(drivenNode, drivenAttrs, parent=parentNode)
         # Check if there any preexisting nodes in setup, if so copy pose index
         if self.currentRBFSetupNodes:
             currentRbfs = self.currentRBFSetupNodes[0]
@@ -678,12 +664,7 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
                                                                 rbfNode)
             rbfNode.syncPoseIndices(self.currentRBFSetupNodes[0])
         else:
-            if self.zeroedDefaults:
-                rbfNode.applyDefaultPose()
-            else:
-                poseInputs = rbf_node.getMultipleAttrs(driverNode, driverAttrs)
-                rbfNode.addPose(poseInput=poseInputs,
-                                poseValue=defaultVals[1::2])
+            rbfNode.applyDefaultPose()
             self.populateDriverInfo(rbfNode, rbfNode.getNodeInfo())
         # add newly created RBFNode to list of current
         self.currentRBFSetupNodes.append(rbfNode)
@@ -693,8 +674,7 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         self.populateDrivenWidgetInfo(tabDrivenWidget, weightInfo, rbfNode)
         self.refreshRbfSetupList(setToSelection=setupName)
         self.lockDriverWidgets()
-        if driverControl:
-            mc.select(driverControl)
+        mc.select(driverControl)
 
     def refreshAllTables(self):
         """Convenience function to refresh all the tables on all the tabs
@@ -1576,15 +1556,6 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         self.absWorld = toggleState
         print "Recording poses in world space set to: {}".format(toggleState)
 
-    def toggleDefaultType(self, toggleState):
-        """records whether the user wants default poses to be zeroed
-
-        Args:
-            toggleState (bool): default True
-        """
-        self.zeroedDefaults = toggleState
-        print "Default poses are zeroed: {}".format(toggleState)
-
     # signal management -------------------------------------------------------
     def connectSignals(self):
         """connect all the signals in the UI
@@ -1839,6 +1810,7 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         mainMenuBar = QtWidgets.QMenuBar()
         mainMenuBar.setContentsMargins(0, 0, 0, 0)
         file = mainMenuBar.addMenu("File")
+        file.setToolTipsVisible(True)
         menu1 = file.addAction("Re-evaluate Nodes", self.reevalluateAllNodes)
         menu1.setToolTip("Force all RBF nodes to re-revaluate.")
         file.addAction("Export All", self.exportNodes)
@@ -1849,11 +1821,13 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         file.addAction("Delete Current Setup", self.__deleteSetup)
         # mirror --------------------------------------------------------------
         mirrorMenu = mainMenuBar.addMenu("Mirror")
+        mirrorMenu.setToolTipsVisible(True)
         mirrorMenu1 = mirrorMenu.addAction("Mirror Setup", self.mirrorSetup)
         mirrorMenu1.setToolTip("This will create a new setup.")
 
         # settings ------------------------------------------------------------
         settingsMenu = mainMenuBar.addMenu("Settings")
+        settingsMenu.setToolTipsVisible(True)
         menuLabel = "Add poses in worldSpace"
         worldSpaceMenuItem = settingsMenu.addAction(menuLabel)
         worldSpaceMenuItem.toggled.connect(self.toggleGetPoseType)
@@ -1861,14 +1835,6 @@ class RBFManagerUI(MayaQWidgetDockableMixin, QtWidgets.QMainWindow):
         worldSpaceMenuItem.setCheckable(True)
         worldSpaceMenuItem.setChecked(True)
         toolTip = "When ADDING NEW pose, should it be recorded in worldSpace."
-
-        menuLabel = "Default Poses is Zeroed"
-        zeroedDefaultsMenuItem = settingsMenu.addAction(menuLabel)
-        zeroedDefaultsMenuItem.toggled.connect(self.toggleDefaultType)
-
-        zeroedDefaultsMenuItem.setCheckable(True)
-        zeroedDefaultsMenuItem.setChecked(True)
-
         worldSpaceMenuItem.setToolTip(toolTip)
 
         # show override -------------------------------------------------------

@@ -6,7 +6,7 @@
 import traceback
 import maya.OpenMayaUI as omui
 
-from mgear.vendor.Qt import QtGui, QtWidgets, QtCompat
+from mgear.vendor.Qt import QtWidgets, QtCompat
 
 # TODO: Delete after finish refactor
 # not used in this module, but imported in others
@@ -48,21 +48,18 @@ def showDialog(dialog, dInst=True, *args):
     # Create minimal dialog object
 
     # if versions.current() >= 20180000:
-    #     window = dialog(maya_main_window())
+    #     windw = dialog(maya_main_window())
     # else:
-    window = dialog()
-
-    cursor = QtGui.QCursor().pos()
-    window.move(
-        QtWidgets.QApplication.desktop().screenGeometry(cursor).center()
-        - window.rect().center())
+    windw = dialog()
+    windw.move(QtWidgets.QApplication.desktop().screen().rect().center()
+               - windw.rect().center())
 
     # Delete the UI if errors occur to avoid causing winEvent
     # and event errors (in Maya 2014)
     try:
-        window.show()
+        windw.show()
     except Exception:
-        window.deleteLater()
+        windw.deleteLater()
         traceback.print_exc()
 
 
