@@ -54,7 +54,7 @@ def createMenu():
                      parent="MayaWindow",
                      tearOff=True,
                      allowOptionBoxes=True,
-                     label="mGear")
+                     label="Marcus mGear")
 
     # Rigging systems
     # Shifter rigging builder
