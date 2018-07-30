@@ -9,7 +9,7 @@ import mgear
 
 from mgear.maya import synoptic, skin, rigbits, attribute, shifter
 from mgear.maya.simpleRig import simpleRigTool, simpleRig_legacy
-from mgear.maya.animbits import softTweaks
+from mgear.maya.animbits import softTweaks, crankTool
 from mgear.maya.rigbits import (
     postSpring,
     rope,
@@ -213,6 +213,7 @@ def createMenu():
     pm.menuItem(label="Synoptic", command=synoptic.open)
     pm.menuItem(divider=True)
     pm.menuItem(label="Soft Tweaks", command=softTweaks.openSoftTweakManager)
+    pm.menuItem(label="Crank: Shot Sculpt", command=crankTool.openUI)
     pm.menuItem(divider=True)
     pm.menuItem(label="Import Mocap Skeleton Biped",
                 command=importSkeletonBiped)
