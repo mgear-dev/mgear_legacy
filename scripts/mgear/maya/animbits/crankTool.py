@@ -241,7 +241,8 @@ def add_frame_sculpt(layer_node, anim=False, keyf=[1, 0, 0, 1]):
 
     for obj, bsn in zip(objs, bs_node):
         dup = pm.duplicate(obj)[0]
-        bst_name = "_".join([obj.name(), frame_name])
+        # bst_name = "_".join([obj.name(), frame_name])
+        bst_name = "_".join([obj.stripNamespace(), frame_name])
         pm.rename(dup, bst_name)
         indx = bsn.weight.getNumElements()
         pm.blendShape(bsn,
