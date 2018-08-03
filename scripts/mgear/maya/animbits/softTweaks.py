@@ -16,7 +16,8 @@ import json
 import pymel.core as pm
 from pymel.core import datatypes
 
-from mgear.maya import pyqt, attribute, icon, node, primitive, applyop
+from mgear import string
+from mgear.maya import pyqt, attribute, icon, node, primitive, applyop, skin
 import mgear.maya.animbits.softTweakWindowUI as stUI
 
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
@@ -28,6 +29,10 @@ from mgear.vendor.Qt import QtCore, QtWidgets, QtGui
 # Soft Tweak
 #########################################
 
+
+ASSET_TAG = "_isAssetSoftTweak"
+SHOT_TAG = "_isSoftTweak"
+
 # CREATORS -------------------------------
 # Create the controls for the softTweak
 
@@ -35,7 +40,7 @@ from mgear.vendor.Qt import QtCore, QtWidgets, QtGui
 def _createSoftTweakControls(name,
                              parent=None,
                              t=datatypes.Matrix(),
-                             grp=None,
+                             grps=None,
                              size=0.5):
     root_name = "{}_{}".format(name, "softTweak_root")
     namespace = None
@@ -74,27 +79,30 @@ def _createSoftTweakControls(name,
                                color=[0.89, 0.0, 0.143],
                                icon="diamond",
                                w=size * .8)
-        attribute.addAttribute(tweakCtl, "falloff", "float", .5)
+        attribute.addAttribute(tweakCtl, "falloff", "float", size)
 
-        if grp:
-            try:
-                # try if exist
-                oGrp = pm.PyNode(grp)
-            except pm.MayaNodeError:
-                # create a new grp if does't exist
-                if len(grp.split("_")) >= 3:  # simple check  name convention
-                    name = grp
-                else:
-                    name = "rig_{}_grp".format(grp)
+        if grps:
+            if not isinstance(grps, list):
+                grps = [grps]
+            for grp in grps:
+                try:
+                    # try if exist
+                    oGrp = pm.PyNode(grp)
+                except pm.MayaNodeError:
+                    # create a new grp if does't exist
+                    if len(grp.split("_")) >= 3:  # check  name convention
+                        name = grp
+                    else:
+                        name = "rig_{}_grp".format(grp)
 
-                    # namespace basic handling
-                    # NOTE: Doesn't support more than one namespace stacked
-                    if namespace and len(name.split(":")) < 2:
-                        name = namespace + name
+                        # namespace basic handling
+                        # NOTE: Doesn't support more than one namespace stacked
+                        if namespace and len(name.split(":")) < 2:
+                            name = namespace + name
 
-                oGrp = pm.sets(n=name, em=True)
+                    oGrp = pm.sets(n=name, em=True)
 
-            pm.sets(oGrp, add=[baseCtl, tweakCtl])
+                pm.sets(oGrp, add=[baseCtl, tweakCtl])
         if t:
             root.setMatrix(t, worldSpace=True)
 
@@ -104,10 +112,15 @@ def _createSoftTweakControls(name,
 # We have separated the softmode creationg so we can use any pre-existing ctl.
 
 
-def _createSoftModTweak(baseCtl, tweakCtl, name, targets):
+def _createSoftModTweak(baseCtl,
+                        tweakCtl,
+                        name,
+                        targets,
+                        nameExt="softMod",
+                        is_asset=False):
 
     sm = pm.softMod(targets, wn=[tweakCtl, tweakCtl])
-    pm.rename(sm[0], "{}_softMod".format(name))
+    pm.rename(sm[0], "{}_{}".format(name, nameExt))
 
     # disconnect default connection
     plugs = sm[0].softModXforms.listConnections(p=True)
@@ -125,7 +138,12 @@ def _createSoftModTweak(baseCtl, tweakCtl, name, targets):
     pm.connectAttr(mulMatrix_node.output, sm[0].weightedMatrix)
     pm.connectAttr(baseCtl.worldInverseMatrix[0], sm[0].postMatrix)
     pm.connectAttr(baseCtl.worldMatrix[0], sm[0].preMatrix)
-    attribute.addAttribute(sm[0], "_isSoftTweak", "bool", False, keyable=False)
+    if is_asset:
+        tag_name = ASSET_TAG
+    else:
+        tag_name = SHOT_TAG
+
+    attribute.addAttribute(sm[0], tag_name, "bool", False, keyable=False)
 
     sm[0].addAttr("ctlRoot", at='message', m=False)
     sm[0].addAttr("ctlBase", at='message', m=False)
@@ -134,11 +152,64 @@ def _createSoftModTweak(baseCtl, tweakCtl, name, targets):
     pm.connectAttr(baseCtl.attr("message"), sm[0].attr("ctlBase"))
     pm.connectAttr(tweakCtl.attr("message"), sm[0].attr("ctlTweak"))
 
+    # This connection allow the softTweak to work if we apply the  skin
+    # precision fix.
+    # TODO: By default only apply to a non asset tweaks.
+    if skin.getSkinCluster(targets[0]) and not is_asset:
+
+        skin_cls = skin.getSkinCluster(targets[0])
+        cnxs = skin_cls.matrix[0].listConnections()
+        if (cnxs and cnxs[0].type() == "mgear_mulMatrix" and
+                not sm[0].hasAttr("_fixedSkinFix")):
+
+            # tag the softmod as fixed
+            attribute.addAttribute(sm[0], "_fixedSkinFix", "bool")
+
+            # original connections
+            matrix_cnx = sm[0].matrix.listConnections(p=True)[0]
+            preMatrix_cnx = sm[0].preMatrix.listConnections(p=True)[0]
+            wgtMatrix_cnx = sm[0].weightedMatrix.listConnections(p=True)[0]
+            postMatrix_cnx = sm[0].postMatrix.listConnections(p=True)[0]
+
+            # pre existing node operators
+            mulMtx_node = wgtMatrix_cnx.node()
+            dcMtx_node = sm[0].falloffCenter.listConnections(p=True)[0].node()
+
+            # geo offset connnections
+            geo_root = targets[0].getParent()
+            gr_W = geo_root.worldMatrix[0]
+            gr_WI = geo_root.worldInverseMatrix[0]
+
+            # new offset operators
+            mmm1 = applyop.gear_mulmatrix_op(preMatrix_cnx, gr_WI)
+            mmm2 = applyop.gear_mulmatrix_op(matrix_cnx, gr_WI)
+            mmm3 = applyop.gear_mulmatrix_op(gr_W, postMatrix_cnx)
+
+            # re-wire connections
+            pm.connectAttr(mmm1.output, dcMtx_node.inputMatrix, f=True)
+            pm.connectAttr(mmm1.output, sm[0].preMatrix, f=True)
+
+            pm.connectAttr(mmm2.output, sm[0].matrix, f=True)
+            pm.connectAttr(mmm2.output, mulMtx_node.matrixA, f=True)
+
+            pm.connectAttr(mmm3.output, mulMtx_node.matrixB, f=True)
+            pm.connectAttr(mmm3.output, sm[0].postMatrix, f=True)
+
+            _neutra_geomMatrix(sm[0])
+
     return sm[0]
 
 
 #  Create softTweak and controls convenience function.
-def createSoftTweak(name, targets=[], parent=None, t=None, grp=None, size=0.5):
+def createSoftTweak(name,
+                    targets=[],
+                    parent=None,
+                    t=None,
+                    grp=None,
+                    size=0.5,
+                    nameExt="softMod",
+                    is_asset=False):
+
     with pm.UndoChunk():
         if isinstance(targets, basestring):
             targets = pm.PyNode(targets)
@@ -157,11 +228,51 @@ def createSoftTweak(name, targets=[], parent=None, t=None, grp=None, size=0.5):
             name, parent, t, grp, size)
 
         if baseCtl:
-            softModNode = _createSoftModTweak(baseCtl, tweakCtl, name, targets)
+            softModNode = _createSoftModTweak(baseCtl,
+                                              tweakCtl,
+                                              name,
+                                              targets,
+                                              nameExt,
+                                              is_asset)
 
             return softModNode, baseCtl, tweakCtl
         else:
             return False, False, False
+
+
+# Create Auto SoftTweak
+def createAutoSoftTweak(size=1.0,
+                        nameExt="softMod",
+                        is_asset=False):
+
+    # get the object to apply
+    if pm.selected() and len(pm.selected()) >= 2:
+        oSel = [x for x in pm.selected()[:-1]
+                if x.getShape().type()
+                in ["mesh", "nurbsSurface"]]
+    else:
+        pm.displayWarning("Selection should be at less 2 object. The "
+                          " deformed object and the parent control")
+        return
+    ctl_parent = pm.selected()[-1]
+    grps = [s.name() for s in ctl_parent.listConnections(type="objectSet")]
+    if ctl_parent.name().endswith("_ctl"):
+        baseName = "_".join(ctl_parent.name().split("_")[:-1])
+    else:
+        baseName = ctl_parent.name()
+    idName = 0
+    while pm.ls("_".join([baseName, str(idName), "softTweak_ctl"])):
+        idName += 1
+
+    createSoftTweak(baseName + "_" + str(idName),
+                    targets=oSel,
+                    parent=ctl_parent,
+                    t=ctl_parent.getMatrix(worldSpace=True),
+                    grp=grps,
+                    size=size,
+                    nameExt=nameExt,
+                    is_asset=is_asset)
+    pm.select(oSel, r=True)
 
 
 # EDIT -------------------------------
@@ -178,9 +289,8 @@ def _getAffectedObjects(softMods):
 
     return affectedList
 
+
 # get plugget object
-
-
 def _getPluggetObj(softMods, plug):
     ctlRoots = []
     if not isinstance(softMods, list):
@@ -190,6 +300,17 @@ def _getPluggetObj(softMods, plug):
             softMod = pm.PyNode(softMod)
         ctlRoots.append(softMod.attr(plug).listConnections(p=True)[0].node())
     return ctlRoots
+
+
+def _neutra_geomMatrix(softmod):
+    # ensure the geomMatrix is neutral
+    # this will fix the softTweak if it is apply in other position
+    # that is not bindpose
+    at = softmod.geomMatrix
+    m = datatypes.Matrix()
+    targets = _getAffectedObjects(softmod)
+    for i in xrange(len(targets)):
+        at.attr("geomMatrix[{}]".format(str(i))).set(m)
 
 
 # add or remove obj from softmod
@@ -211,6 +332,8 @@ def _addRemoveSoftMode(softMods, targets=[], add=True):
             else:
                 pm.sets(softSet[0], rm=targets)
 
+        _neutra_geomMatrix(softMod)
+
 
 # add to softmod
 def addToSoftMod(softMods, targets=[]):
@@ -225,8 +348,12 @@ def removeSoftMod(softMods, targets=[]):
 # list soft modeTweaks in the scene
 
 
-def _listSoftModTweaks():
-    return [sm for sm in pm.ls(type="softMod") if sm.hasAttr("_isSoftTweak")]
+def _listSoftModTweaks(is_asset=False):
+    if is_asset:
+        tag_name = ASSET_TAG
+    else:
+        tag_name = SHOT_TAG
+    return [sm for sm in pm.ls(type="softMod") if sm.hasAttr(tag_name)]
 
 
 def _buildConfigDict(softMods=[]):
@@ -247,7 +374,12 @@ def _buildConfigDict(softMods=[]):
         ctl = sm.ctlTweak.listConnections(p=True)[0].node()
 
         # base name without the extension_softMod
-        softModConfig["name"] = sm.name().replace("_softMod", "")
+        # softModConfig["name"] = sm.name().replace("_softMod", "")
+        softModConfig["name"] = "_".join(sm.name().split("_")[:-1])
+        # name extension
+        softModConfig["nameExt"] = sm.name().split("_")[-1]
+        # is asset
+        softModConfig["isAsset"] = sm.hasAttr(ASSET_TAG)
         # fallof value
         softModConfig["falloff"] = ctl.falloff.get()
         # affected objects
@@ -275,7 +407,7 @@ def _buildConfigDict(softMods=[]):
         oSet = ctl.instObjGroups.listConnections()
         if oSet:
             # grp = oSet[0].node().name()
-            grp = oSet[0].name()
+            grp = [g.name() for g in oSet]
         else:
             grp = None
         softModConfig["grpName"] = grp
@@ -325,13 +457,17 @@ def _importConfiguration(configDict):
             parent = smConfig["rootParent"]
             size = smConfig["iconSize"]
             grp = smConfig["grpName"]
+            is_asset = smConfig["isAsset"]
+            nameExt = smConfig["nameExt"]
             rootMatrix = datatypes.Matrix(smConfig["rootMatrix"])
             softModNode, baseCtl, tweakCtl = createSoftTweak(name,
                                                              targets=targets,
                                                              parent=parent,
                                                              t=rootMatrix,
                                                              grp=grp,
-                                                             size=size)
+                                                             size=size,
+                                                             nameExt=nameExt,
+                                                             is_asset=is_asset)
             if softModNode:
                 ctlBaseMatrix = datatypes.Matrix(smConfig["baseCtlMatrix"])
                 ctlMatrix = datatypes.Matrix(smConfig["ctlMatrix"])
@@ -427,7 +563,8 @@ class softTweakManager(MayaQWidgetDockableMixin, QtWidgets.QDialog):
 
     def _refreshList(self):
         model = QtGui.QStandardItemModel(self)
-        for t_node in _listSoftModTweaks():
+        is_asset = self.stUIInst.isAsset_checkBox.isChecked()
+        for t_node in _listSoftModTweaks(is_asset):
             model.appendRow(QtGui.QStandardItem(t_node.name()))
         self.setSourceModel(model)
 
@@ -451,6 +588,7 @@ class softTweakManager(MayaQWidgetDockableMixin, QtWidgets.QDialog):
         self.stUIInst.addObjectToTweak_pushButton.clicked.connect(self.addObj)
         self.stUIInst.removeObjFromTweak_pushButton.clicked.connect(
             self.removeObj)
+        self.stUIInst.auto_pushButton.clicked.connect(self.autoTweak)
         self.stUIInst.setParent_pushButton.clicked.connect(self.setTweakParent)
         self.stUIInst.setCtrlGrp_pushButton.clicked.connect(self.setCtlGrp)
         self.stUIInst.newTweak_pushButton.clicked.connect(self.newTweak)
@@ -461,15 +599,38 @@ class softTweakManager(MayaQWidgetDockableMixin, QtWidgets.QDialog):
             self.selectBaseCtl)
         self.stUIInst.selectCtl_pushButton.clicked.connect(self.selectCtl)
 
+        self.stUIInst.isAsset_checkBox.clicked.connect(self._refreshList)
+
         # actions
         self.stUIInst.exportSelected_action.triggered.connect(
             self.exportSelection)
         self.stUIInst.exportAll_action.triggered.connect(self.exportAll)
         self.stUIInst.import_action.triggered.connect(self.importConfiguration)
 
+        # Misc
+        self.stUIInst.name_lineEdit.textChanged.connect(
+            self.name_text_changed)
+        self.stUIInst.customExt_lineEdit.textChanged.connect(
+            self.nameExt_text_changed)
+        self.stUIInst.customExt_checkBox.toggled.connect(
+            self.stUIInst.customExt_lineEdit.setEnabled)
+
     #############
     # SLOTS
     #############
+    @staticmethod
+    def _validate_name(name):
+        # check and correct bad formating
+        return string.removeInvalidCharacter(name)
+
+    def name_text_changed(self):
+        name = self._validate_name(self.stUIInst.name_lineEdit.text())
+        self.stUIInst.name_lineEdit.setText(name)
+
+    def nameExt_text_changed(self):
+        name = self._validate_name(self.stUIInst.customExt_lineEdit.text())
+        self.stUIInst.customExt_lineEdit.setText(name)
+
     def filterChanged(self, filter):
         regExp = QtCore.QRegExp(filter,
                                 QtCore.Qt.CaseSensitive,
@@ -484,7 +645,8 @@ class softTweakManager(MayaQWidgetDockableMixin, QtWidgets.QDialog):
         exportConfiguration(softMods)
 
     def exportAll(self):
-        softMods = _listSoftModTweaks()
+        is_asset = self.stUIInst.isAsset_checkBox.isChecked()
+        softMods = _listSoftModTweaks(is_asset)
         exportConfiguration(softMods)
 
     # import configuration
@@ -530,6 +692,20 @@ class softTweakManager(MayaQWidgetDockableMixin, QtWidgets.QDialog):
     def setTweakParent(self):
         self._populate_object(self.stUIInst.parent_lineEdit)
 
+    def _getIsAssetNameExtSize(self):
+        size = self.stUIInst.size_doubleSpinBox.value()
+        if self.stUIInst.customExt_checkBox.isChecked():
+            nameExt = self.stUIInst.customExt_lineEdit.text()
+        else:
+            nameExt = "softMod"
+        is_asset = self.stUIInst.isAsset_checkBox.isChecked()
+        return is_asset, nameExt, size
+
+    def autoTweak(self):
+        is_asset, nameExt, size = self._getIsAssetNameExtSize()
+        createAutoSoftTweak(size, nameExt, is_asset)
+        self._refreshList()
+
     def newTweak(self):
         name = self.stUIInst.name_lineEdit.text()
         if not name:
@@ -557,13 +733,16 @@ class softTweakManager(MayaQWidgetDockableMixin, QtWidgets.QDialog):
             pm.displayError("Some objects on the current selection are "
                             "not valid. Please review the selection")
             return
-        size = self.stUIInst.size_doubleSpinBox.value()
+
+        is_asset, nameExt, size = self._getIsAssetNameExtSize()
         createSoftTweak(name,
                         targets=oSel,
                         parent=parent,
                         t=trans,
                         grp=grp,
-                        size=size)
+                        size=size,
+                        nameExt=nameExt,
+                        is_asset=is_asset)
         self._refreshList()
         pm.select(oSel, r=True)
 

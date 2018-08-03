@@ -2,16 +2,17 @@
 
 mGear is a rigging framework for Autodesk Maya. mGear provides a set of convenient modules, tools and c++ solvers to streamline the development of rigging and animation tools.
 
-Originally mGear was design and develope by Jeremie Passerin , since 2013 Miquel Campos continued the project and evolved to the current design.
+Originally mGear was design and develope by Jeremie Passerin and [Miquel Campos](http://www.miquel-campos.com/). Currently  mGear is maintained by the mgear-dev organization team.
 
-MGEAR is under the terms of the MIT License
+**MGEAR is under the terms of the MIT License**
 
-*Latest release: 2.4.2 ( Release Log: https://miquelcampos.github.io/mgear/releaseLog.html)
+### Useful links:
 
-For the official release, with compiled solvers and example data please download mGear from: https://gumroad.com/l/mgear
+- [mGear Web](http://www.mgear-framework.com/)
+- [mGear Forum](http://forum.mgear-framework.com/)
+- [mGear Youtube channel](https://www.youtube.com/c/mgearriggingframework)
+- [API Docs](http://www.mgear-framework.com/mgear/)
+- [Release Log](http://www.mgear-framework.com/mgear/releaseLog.html)
+- For the official release, with compiled solvers: [Releases](https://github.com/mgear-dev/mgear/releases)
 
-Official Documentation: https://miquelcampos.github.io/mgear/
-
-mGear Goggle group: https://groups.google.com/forum/#!forum/mgearusergroup
-
-Youtube channel: https://www.youtube.com/c/mgearriggingframework
+### Latest release: [2.5.24](https://github.com/mgear-dev/mgear/releases)

@@ -324,6 +324,9 @@ class Main(object):
                                jnt + ".r",
                                f=True)
 
+            # set not keyable
+            attribute.setNotKeyableAttributes(jnt)
+
         else:
             jnt = primitive.addJoint(obj, self.getName(
                 str(name) + "_jnt"), transform.getTransform(obj))
@@ -331,6 +334,37 @@ class Main(object):
             attribute.lockAttribute(jnt)
 
         self.addToGroup(jnt, "deformers")
+
+        # This is a workaround due the evaluation problem with compound attr
+        # TODO: This workaround, should be removed onces the evaluation issue
+        # is fixed
+        # github issue: Shifter: Joint connection: Maya evaluation Bug #210
+        dm = jnt.r.listConnections(p=True, type="decomposeMatrix")
+        if dm:
+            at = dm[0]
+            dm_node = at.node()
+            pm.disconnectAttr(at, jnt.r)
+            pm.connectAttr(dm_node.outputRotateX, jnt.rx)
+            pm.connectAttr(dm_node.outputRotateY, jnt.ry)
+            pm.connectAttr(dm_node.outputRotateZ, jnt.rz)
+
+        dm = jnt.t.listConnections(p=True, type="decomposeMatrix")
+        if dm:
+            at = dm[0]
+            dm_node = at.node()
+            pm.disconnectAttr(at, jnt.t)
+            pm.connectAttr(dm_node.outputTranslateX, jnt.tx)
+            pm.connectAttr(dm_node.outputTranslateY, jnt.ty)
+            pm.connectAttr(dm_node.outputTranslateZ, jnt.tz)
+
+        dm = jnt.s.listConnections(p=True, type="decomposeMatrix")
+        if dm:
+            at = dm[0]
+            dm_node = at.node()
+            pm.disconnectAttr(at, jnt.s)
+            pm.connectAttr(dm_node.outputScaleX, jnt.sx)
+            pm.connectAttr(dm_node.outputScaleY, jnt.sy)
+            pm.connectAttr(dm_node.outputScaleZ, jnt.sz)
 
         return jnt
 
@@ -376,7 +410,8 @@ class Main(object):
                iconShape,
                tp=None,
                lp=True,
-               **kwargs):
+               mirrorConf=[0, 0, 0, 0, 0, 0, 0, 0, 0],
+               ** kwargs):
         """
         Create the control and apply the shape, if this is alrealdy stored
         in the guide controllers grp.
@@ -414,7 +449,7 @@ class Main(object):
                 parent, fullName, m, color, iconShape, **kwargs)
 
         # create the attributes to handlde mirror and symetrical pose
-        attribute.add_mirror_config_channels(ctl)
+        attribute.add_mirror_config_channels(ctl, mirrorConf)
 
         if self.settings["ctlGrp"]:
             ctlGrp = self.settings["ctlGrp"]

@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 """rbf node to normalize the calls across any number of supported
 rbf node types. First supported "weightDriver"/ingo clemens/Brave Rabit
 
@@ -6,7 +7,7 @@ Attributes:
     DRIVEN_SUFFIX (str): suffix to be applied to driven group
     DRIVER_CTL_ATTR_NAME (str): name of the attribute to store driver control
     DRIVER_POSEINPUT_ATTR (str): name of attr to store control driver(holder)
-    DRIVER_POSES_ATTR (str): name of attr to store control
+    DRIVER_POSES_INFO_ATTR (str): name of attr to store control
     GENERIC_SUFFIX (str): generic suffix if one not provided by support module
     RBF_SCALE_ATTR (str): name of attr applied to driven control
     RBF_SETUP_ATTR (str): name of attr to store setup name for group of rbf
@@ -16,10 +17,14 @@ Attributes:
     TRANSFORM_SUFFIX (str): suffix of transform nodes for rbf nodes
     TRANSLATE_ATTRS (list): convenience list of transform attrs
 
-TODO - refactor as more supported rbf node types are added
+Notes - refactor as more supported rbf node types are added
+
+__author__ = "Rafael Villar"
+__email__ = "rav@ravrigs.com"
 
 """
 # python
+import ast
 import math
 
 # maya
@@ -28,13 +33,17 @@ import pymel.core as pm
 import maya.OpenMaya as OpenMaya
 
 # mgear
-from mgear.maya import transform
+from mgear.maya import transform, attribute
+from mgear.maya.synoptic import utils
+
 
 # =============================================================================
 # constants
 # =============================================================================
 
 DRIVEN_SUFFIX = "_driven"
+DRIVEN_PAR_SUFFIX = "_drivenPar"
+RBF_LOCATOR_SUFFIX = "_rbfLoc"
 CTL_SUFFIX = "_ctl"
 TRANSFORM_SUFFIX = "_trfm"
 
@@ -57,8 +66,8 @@ SUPPORTED_RBF_NODES = ("weightDriver",)
 GENERIC_SUFFIX = "_RBF"
 
 DRIVER_CTL_ATTR_NAME = "driverControlName"
-DRIVER_POSES_ATTR = "driverPoses"
-DRIVER_POSEINPUT_ATTR = "poseInput"
+DRIVER_POSES_INFO_ATTR = "driverPosesInfo"
+# DRIVER_POSEINPUT_ATTR = "poseInput"
 
 RBF_SCALE_ATTR = "RBF_Multiplier"
 
@@ -66,6 +75,43 @@ RBF_SCALE_ATTR = "RBF_Multiplier"
 # =============================================================================
 # general functions
 # =============================================================================
+def getMultipleAttrs(node, attributes):
+    """get multiple attrs and their values in a list, in order
+
+    Args:
+        node (str): name of node
+        attributes (list): of attrs to query
+
+    Returns:
+        list: of values
+    """
+    valuesToReturn = []
+    for attr in attributes:
+        valuesToReturn.append(mc.getAttr("{}.{}".format(node, attr)))
+    return valuesToReturn
+
+
+def copyInverseMirrorAttrs(srcNode, dstNode):
+    """within mGear the concept of inverseAttrs, so that transforms can be
+    accurately mirrored, exists and this copys the relavent attrs from src
+    to dest
+
+    Args:
+        srcNode (str, pynode): source node
+        dstNode (str, pynode): destination to copy attrs to
+    """
+    srcNode = pm.PyNode(srcNode)
+    dstNode = pm.PyNode(dstNode)
+    attrsToInv = utils.listAttrForMirror(srcNode)
+    for attr in attrsToInv:
+        inAttr = utils.getInvertCheckButtonAttrName(attr)
+        try:
+            val = mc.getAttr("{}.{}".format(srcNode, inAttr))
+            mc.setAttr("{}.{}".format(dstNode, inAttr), val)
+        except ValueError:
+            continue
+
+
 def addDrivenGroup(node):
     """add driven group, pad, above the provided node for direct connection
 
@@ -75,16 +121,35 @@ def addDrivenGroup(node):
     Returns:
         str: of node created
     """
-    parentOfTarget = mc.listRelatives(node, p=True) or None
-    if not parentOfTarget:
-        return node
+    node = pm.PyNode(node)
+    parentOfTarget = pm.listRelatives(node, p=True) or None
+    if parentOfTarget:
+        parentOfTarget = parentOfTarget[0]
     if node.endswith(CTL_SUFFIX):
         drivenName = node.replace(CTL_SUFFIX, DRIVEN_SUFFIX)
     else:
-        drivenName = "{}{}".format(DRIVEN_SUFFIX)
-    drivenName = mc.group(name=drivenName, p=parentOfTarget[0], em=True)
-    mc.parent(node, drivenName)
-    return drivenName
+        drivenName = "{}{}".format(node, DRIVEN_SUFFIX)
+
+    if parentOfTarget is None:
+        parentOfTarget = pm.group(name=drivenName.replace(DRIVEN_SUFFIX,
+                                                          DRIVEN_PAR_SUFFIX),
+                                  w=True,
+                                  em=True)
+
+    else:
+        parentOfTarget = pm.group(name=drivenName.replace(DRIVEN_SUFFIX,
+                                                          DRIVEN_PAR_SUFFIX),
+                                  p=parentOfTarget,
+                                  em=True)
+    parentOfTarget.setMatrix(node.getMatrix(worldSpace=True),
+                             worldSpace=True)
+    drivenName = pm.group(name=drivenName, p=parentOfTarget, em=True)
+
+    attribute.add_mirror_config_channels(pm.PyNode(drivenName))
+    if node.endswith(CTL_SUFFIX):
+        copyInverseMirrorAttrs(node, drivenName)
+    pm.parent(node, drivenName)
+    return drivenName.name()
 
 
 def removeDrivenGroup(node):
@@ -93,15 +158,51 @@ def removeDrivenGroup(node):
     Args:
         node (str): name of node to check
     """
-    parentOfTarget = mc.listRelatives(node, p=True) or None
-    childrenNode = mc.listRelatives(node, type="transform")
+    drivePar = parentOfTarget = mc.listRelatives(node, p=True) or None
+    if parentOfTarget and parentOfTarget[0].endswith(DRIVEN_PAR_SUFFIX):
+        parentOfTarget = mc.listRelatives(parentOfTarget, p=True) or None
+    childrenNode = mc.listRelatives(node, type="transform") or []
 
     for child in childrenNode:
         if parentOfTarget is None:
             mc.parent(child, w=True)
         else:
             mc.parent(child, parentOfTarget[0])
-    mc.delete(node)
+    if node.endswith(DRIVEN_SUFFIX):
+        mc.delete(node)
+        if drivePar and drivePar[0].endswith(DRIVEN_PAR_SUFFIX):
+            mc.delete(drivePar)
+
+
+def compensateLocator(node):
+    """Create a locator that parents under desired node, to manipulated
+    directly connected nodes.
+    Functionality that is disable, but for future use.
+
+    Args:
+        node (str): desired node
+
+    Returns:
+        str: name of the created locator
+    """
+    mc.select(cl=True)
+    cLoc = mc.spaceLocator(n="{}{}".format(node, RBF_LOCATOR_SUFFIX))
+    mc.parent(cLoc, node, r=True)
+    return cLoc
+
+
+def removeCompensateLocator(node):
+    """remove the locator under the desired node if exists
+
+    Args:
+        node (str): name of the ndoe to look under.
+    """
+    mc.select(cl=True)
+    cmpLoc = "{}{}".format(node, RBF_LOCATOR_SUFFIX)
+    if mc.objExists(cmpLoc):
+        cmpLoc_par = mc.listRelatives(cmpLoc, p=True)
+        if cmpLoc_par and cmpLoc_par[0] == node:
+            mc.delete(cmpLoc)
 
 
 def decompMatrix(node, matrix):
@@ -123,7 +224,7 @@ def decompMatrix(node, matrix):
     mTransformMtx = OpenMaya.MTransformationMatrix(matrix)
 
     # Translation Values
-    trans = mTransformMtx.translation(OpenMaya.MSpace.kObject)
+    trans = mTransformMtx.getTranslation(OpenMaya.MSpace.kPostTransform)
 
     # Euler rotation value in radians
     eulerRot = mTransformMtx.eulerRotation()
@@ -141,7 +242,7 @@ def decompMatrix(node, matrix):
     scaleUtil = OpenMaya.MScriptUtil()
     scaleUtil.createFromList([0, 0, 0], 3)
     scaleVec = scaleUtil.asDoublePtr()
-    mTransformMtx.getScale(scaleVec, OpenMaya.MSpace.kObject)
+    mTransformMtx.getScale(scaleVec, OpenMaya.MSpace.kPostTransform)
     scale = [OpenMaya.MScriptUtil.getDoubleArrayItem(scaleVec, i)
              for i in range(0, 3)]
 
@@ -157,33 +258,74 @@ def resetDrivenNodes(node):
     """
     children = mc.listRelatives(node, type="transform")
     controlNode = node.replace(DRIVEN_SUFFIX, CTL_SUFFIX)
-    if mc.objExists(controlNode) and controlNode in children:
+    otherNode = node.replace(DRIVEN_SUFFIX, "")
+    if mc.objExists(controlNode) and children and controlNode in children:
         transform.resetTransform(pm.PyNode(controlNode))
+    elif mc.objExists("{}{}".format(node, RBF_LOCATOR_SUFFIX)):
+        compoensateLoc = pm.PyNode("{}{}".format(node, RBF_LOCATOR_SUFFIX))
+        transform.resetTransform(compoensateLoc)
+    elif mc.objExists(otherNode):
+        otherNode = pm.PyNode(otherNode)
+        transform.resetTransform(otherNode)
     transform.resetTransform(pm.PyNode(node))
 
 
-def getDrivenMatrix(node):
+def __getResultingMatrix(drivenNode, parentNode, absoluteWorld=True):
+    """convenience function, wrap. given two nodes, one parented under the
+    other
+
+    Args:
+        drivenNode (str): name of the drivenNode
+        parentNode (str): name of the parent node
+        absoluteWorld (bool, optional): calculate in world or check for local
+        differences
+
+    Returns:
+        mmaatrix: resulting matrix of driven and parent
+    """
+    drivenNode = pm.PyNode(drivenNode)
+    nodeInverParMat = parentNode.getAttr("parentInverseMatrix")
+    drivenMat = drivenNode.getMatrix(worldSpace=True)
+    drivenMat_local = drivenNode.getMatrix(objectSpace=True)
+    defaultMat = OpenMaya.MMatrix()
+
+    if defaultMat.isEquivalent(drivenMat_local) and not absoluteWorld:
+        totalMatrix = defaultMat
+        print "Pose recorded in local."
+    else:
+        totalMatrix = drivenMat * nodeInverParMat
+    return totalMatrix
+
+
+def getDrivenMatrix(node, absoluteWorld=True):
     """check if there is a control node for the provided node(driven)
     if so, collect the matrix information for both
 
     Args:
         node (pynode): driven group/driven node
+        absoluteWorld (bool, optional): get the world matrix or defaulted mat
+        if the control is zeroed out.
 
     Returns:
         MMatrix: of total position including the control
     """
-    children = mc.listRelatives(node, type="transform")
+    children = mc.listRelatives(node, type="transform") or []
     node = pm.PyNode(node)
     controlNode = node.replace(DRIVEN_SUFFIX, CTL_SUFFIX)
+    otherNode = node.replace(DRIVEN_SUFFIX, "")
     if mc.objExists(controlNode) and controlNode in children:
-        controlNode = pm.PyNode(controlNode)
+        totalMatrix = __getResultingMatrix(controlNode,
+                                           node,
+                                           absoluteWorld=absoluteWorld)
+    elif mc.objExists(otherNode) and otherNode in children:
+        totalMatrix = __getResultingMatrix(otherNode,
+                                           node,
+                                           absoluteWorld=absoluteWorld)
+    elif mc.objExists("{}{}".format(node, RBF_LOCATOR_SUFFIX)):
+        compoensateLoc = pm.PyNode("{}{}".format(node, RBF_LOCATOR_SUFFIX))
         nodeInverParMat = node.getAttr("parentInverseMatrix")
-        controlMat = controlNode.getMatrix(worldSpace=True)
-        defaultMat = OpenMaya.MMatrix()
-        if controlMat == defaultMat:
-            totalMatrix = defaultMat
-        else:
-            totalMatrix = controlMat * nodeInverParMat
+        controlMat = compoensateLoc.getMatrix(worldSpace=True)
+        totalMatrix = controlMat * nodeInverParMat
     else:
         totalMatrix = node.getMatrix(worldSpace=False)
 
@@ -250,6 +392,103 @@ def getConnectedRBFToggleNode(node, toggleAttr):
     return driverControl
 
 
+def setToggleRBFAttr(node, value, toggleAttr):
+    """Toggle rbfattr on or off (any value provided)
+
+    Args:
+        node (str): name of node with the attr to toggle rbf on/off
+        value (int, bool): on/off
+        toggleAttr (str): name of the attr to set
+    """
+    attrPlug = "{}.{}".format(node, toggleAttr)
+    mc.setAttr(attrPlug, value)
+
+
+def createDriverControlPoseAttr(node):
+    """ensure the driverControlPoseAttr exists on the (RBF)node provided
+
+    Args:
+        node (str): name of the supported RBFNode
+    """
+    try:
+        mc.addAttr(node, ln=DRIVER_POSES_INFO_ATTR, dt="string")
+    except RuntimeError:
+        pass
+
+
+def setDriverControlPoseAttr(node, poseInfo):
+    """set the driverControlPoseAttr with the poseInfo provided, as string
+
+    Args:
+        node (str): name of rbf node to set it on
+        poseInfo (dict): of pose information
+    """
+    if not mc.attributeQuery(DRIVER_POSES_INFO_ATTR, n=node, ex=True):
+        createDriverControlPoseAttr(node)
+    mc.setAttr("{}.{}".format(node, DRIVER_POSES_INFO_ATTR),
+               str(poseInfo),
+               type="string")
+
+
+def getDriverControlPoseAttr(node):
+    """record the dict, stored as a str, holding driver control
+    pose information.
+
+    Args:
+        node (str): name of the RBFNode supported node to query
+
+    Returns:
+        dict: of attr:[value at index]
+    """
+    try:
+        poseInfo = mc.getAttr("{}.{}".format(node, DRIVER_POSES_INFO_ATTR))
+        return ast.literal_eval(poseInfo)
+    except ValueError:
+        return {}
+
+
+def updateDriverControlPoseAttr(node, driverControl, poseIndex):
+    """get the ControlPoseDict add any additionally recorded values to and set
+
+    Args:
+        node (str): name of the RBFNode supported node
+        driverControl (str): name of the control to queary attr info from
+        poseIndex (int): to add the collected pose information to
+    """
+    # TODO future recording of all attrs goes here
+    poseInfo = getDriverControlPoseAttr(node)
+    attrsToUpdate = TRANSLATE_ATTRS + ROTATE_ATTRS + SCALE_ATTRS
+    attrsToUpdate = list(set(attrsToUpdate + poseInfo.keys()))
+    for attr in attrsToUpdate:
+        attrPoseIndices = poseInfo.get(attr, [])
+        lengthOfList = len(attrPoseIndices) - 1
+        newVal = mc.getAttr("{}.{}".format(driverControl, attr))
+        if not attrPoseIndices or lengthOfList < poseIndex:
+            attrPoseIndices.insert(poseIndex, newVal)
+        elif lengthOfList >= poseIndex:
+            attrPoseIndices[poseIndex] = newVal
+
+        poseInfo[attr] = attrPoseIndices
+    setDriverControlPoseAttr(node, poseInfo)
+
+
+def recallDriverControlPose(driverControl, poseInfo, index):
+    """set the driverControl to the index requested. Set as many attrs as is
+    provided in the poseInfo
+
+    Args:
+        driverControl (str): control to set poseAttr infomation on
+        poseInfo (dict): of poses
+        index (int): poseInfo[attrName]:[index]
+    """
+    for attr, values in poseInfo.iteritems():
+        try:
+            # not to be bothered with locked, hidden, connected attrs
+            mc.setAttr("{}.{}".format(driverControl, attr), values[index])
+        except Exception:
+            pass
+
+
 def createDriverControlAttr(node):
     """create the string attr where information will be stored for query
     associated driver anim control
@@ -279,7 +518,7 @@ def getDriverControlAttr(node):
 
 
 def setDriverControlAttr(node, controlName):
-    """set attr with the driver animControl string
+    """ create and set attr with the driver animControl string
 
     Args:
         node (str): name of rbfnode
@@ -470,6 +709,9 @@ class RBFNode(object):
             posesIndex (int, optional): at desired index, if none assume
             latest/new
         """
+        if posesIndex is None:
+            posesIndex = len(self.getPoseInfo()["poseInput"])
+        self.updateDriverControlPoseAttr(posesIndex)
         raise NotImplementedError()
 
     def deletePose(self, indexToPop):
@@ -516,9 +758,19 @@ class RBFNode(object):
         raise NotImplementedError()
 
     def getSetupName(self):
+        """get the name of the setup that the RBFNode belongs to
+
+        Returns:
+            str: skirt_L0, shoulder_R0
+        """
         return getSetupName(self.name)
 
     def setSetupName(self, setupName):
+        """set the name of the setup for the RBFNode
+
+        Args:
+            setupName (str): desired name
+        """
         setSetupName(str(self.name), setupName)
 
     def setDriverNode(self, driverNode, driverAttrs):
@@ -563,19 +815,63 @@ class RBFNode(object):
         """
         NotImplementedError()
 
+    def setDriverControlPoseAttr(self, poseInfo):
+        """set the poseInfo as a string to the DriverControlPoseAttr
+
+        Args:
+            poseInfo (dict): of pose information to set, as a str
+        """
+        setDriverControlPoseAttr(self.name, poseInfo)
+
+    def getDriverControlPoseAttr(self):
+        """retrieve poseInfo from the driverControlPoseAttr as a dict
+
+        Returns:
+            dict: of pose information
+        """
+        driverPoseInfoAttr = getDriverControlPoseAttr(self.name)
+        return driverPoseInfoAttr
+
+    def updateDriverControlPoseAttr(self, posesIndex):
+        """update the driverControlPoseAttr at the specified index
+
+        Args:
+            posesIndex (int): update the pose information at the index
+        """
+        driverControl = self.getDriverControlAttr()
+        updateDriverControlPoseAttr(self.name, driverControl, posesIndex)
+
     def setDriverControlAttr(self, controlName):
+        """ create and set attr with the driver animControl string
+
+        Args:
+            controlName (str): name of animControl(usually)
+        """
         setDriverControlAttr(self.name, controlName)
 
     def getDriverControlAttr(self):
+        """get the driverControlAttr
+
+        Returns:
+            str: the name of the control set within the attr
+        """
         driverControl = getDriverControlAttr(self.name)
         if driverControl == "":
             driverControl = self.getDriverNode()[0]
         return driverControl
 
     def recallDriverPose(self, poseIndex):
-        NotImplementedError()
+        """recall the pose on the controlDriver with information at the
+        specified index
 
-    def getPoseValues(self, resetDriven=True):
+        Args:
+            poseIndex (int): desired index, matches pose index on rbfNode
+        """
+        driverControl = self.getDriverControlAttr()
+        poseInfo = getDriverControlPoseAttr(self.name)
+        recallDriverControlPose(driverControl, poseInfo, poseIndex)
+
+    def getPoseValues(self, resetDriven=True, absoluteWorld=True):
         """get all pose values from rbf node
 
         Args:
@@ -587,10 +883,13 @@ class RBFNode(object):
         attributeValue_dict = {}
         drivenNode = self.getDrivenNode()[0]
         drivenAttrs = self.getDrivenNodeAttributes()
-        (trans,
-         rotate,
-         scale) = decompMatrix(drivenNode,
-                               getDrivenMatrix(drivenNode))
+        if (mc.attributeQuery("matrix", n=drivenNode, ex=True) and
+                mc.attributeQuery("worldMatrix", n=drivenNode, ex=True)):
+            (trans,
+             rotate,
+             scale) = decompMatrix(drivenNode,
+                                   getDrivenMatrix(drivenNode,
+                                                   absoluteWorld=absoluteWorld))
         for attr in drivenAttrs:
             if attr in TRANSLATE_ATTRS:
                 index = TRANSLATE_ATTRS.index(attr)
@@ -628,8 +927,60 @@ class RBFNode(object):
         Returns:
             TYPE: Description
         """
-        driverControl = getConnectedRBFToggleNode(self.name,
-                                                  self.getRBFToggleAttr())
+        driverControl = self.getConnectedRBFToggleNode()
         if not driverControl:
             return
         deleteRBFToggleAttr(driverControl)
+
+    def setToggleRBFAttr(self, value):
+        """Toggle rbfattr on or off (any value provided)
+
+        Args:
+            value (TYPE): Description
+        """
+        driverControl = self.getConnectedRBFToggleNode()
+        setToggleRBFAttr(driverControl, value, RBF_SCALE_ATTR)
+
+    def getConnectedRBFToggleNode(self):
+        """return the node connected to the RBFNodes toggle attr
+
+        Returns:
+            str: name of node
+        """
+        return getConnectedRBFToggleNode(self.name, self.getRBFToggleAttr())
+
+    def syncPoseIndices(self, srcNode):
+        raise NotImplementedError()
+
+    def applyDefaultPose(self, posesIndex=0):
+        """apply default pose, WARNING. Applying default on more than one index
+        will result in rbf decomp error.
+
+        Args:
+            posesIndex (int, optional): index to default values
+        """
+        driverNode = self.getDriverNode()[0]
+        driverAttrs = self.getDriverNodeAttributes()
+        poseInputs = getMultipleAttrs(driverNode, driverAttrs)
+        drivenAttrs = self.getDrivenNodeAttributes()
+        newPoseValues = []
+        for attr in drivenAttrs:
+            if attr in SCALE_ATTRS:
+                newPoseValues.append(1.0)
+            else:
+                newPoseValues.append(0.0)
+        self.addPose(poseInput=poseInputs,
+                     poseValue=newPoseValues,
+                     posesIndex=posesIndex)
+
+    def compensateForDirectConnect(self):
+        drivenNode = self.getDrivenNode()[0]
+        if (mc.nodeType(drivenNode) not in ["transform", "joint"] or
+            mc.objExists("{}{}".format(drivenNode, RBF_LOCATOR_SUFFIX)) or
+            drivenNode.endswith(DRIVEN_SUFFIX)):
+            return
+        transformAttrs = set(TRANSLATE_ATTRS + ROTATE_ATTRS + SCALE_ATTRS)
+        drivenAttrs = set(self.getDrivenNodeAttributes())
+        if not drivenAttrs.intersection(transformAttrs):
+            return
+        cmpLoc = compensateLocator(drivenNode)

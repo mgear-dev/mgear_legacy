@@ -1,8 +1,13 @@
+#!/usr/bin/env python
 """Handles the import and exporting of all supported RBF node types
 
 Attributes:
     RBF_FILE_EXTENSION (str): extention of the serialized json data
     RBF_MODULES (Dict): nodeType: module api, normalized to fit the rbfManager
+
+__author__ = "Rafael Villar"
+__email__ = "rav@ravrigs.com"
+
 """
 # python
 import json
@@ -12,6 +17,9 @@ import maya.cmds as mc
 
 # RBF setups
 import weightNode_io
+
+# debug
+# reload(weightNode_io)
 # =============================================================================
 # Constants
 # =============================================================================

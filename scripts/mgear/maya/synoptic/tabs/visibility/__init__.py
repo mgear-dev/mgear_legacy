@@ -7,13 +7,12 @@ from . import widget
 ##################################################
 
 
-class SynopticTab(MainSynopticTab, widget.Ui_biped_body):
+class SynopticTab(MainSynopticTab, widget.Ui_visibility):
 
-    description = "biped body"
-    name = "biped_body"
+    description = "visibility"
+    name = "visibility"
 
     # ============================================
     # INIT
     def __init__(self, parent=None):
         super(SynopticTab, self).__init__(self, parent)
-        self.cbManager.selectionChangedCB(self.name, self.selectChanged)

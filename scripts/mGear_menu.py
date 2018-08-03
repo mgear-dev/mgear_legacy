@@ -9,7 +9,7 @@ import mgear
 
 from mgear.maya import synoptic, skin, rigbits, attribute, shifter
 from mgear.maya.simpleRig import simpleRigTool, simpleRig_legacy
-from mgear.maya.animbits import softTweaks
+from mgear.maya.animbits import softTweaks, crankTool
 from mgear.maya.rigbits import (
     postSpring,
     rope,
@@ -78,7 +78,7 @@ def createMenu():
 
     # Simple rig
     pm.menuItem(parent="mGear", subMenu=True, tearOff=True, label="Simple Rig")
-    pm.menuItem(label="Simple Rig Tool", command=simpleRigTool.open)
+    pm.menuItem(label="Simple Rig Tool", command=simpleRigTool.openSimpleRigUI)
     pm.menuItem(divider=True)
     pm.menuItem(subMenu=True, tearOff=True, label="simpleRig Legacy")
     pm.menuItem(label="Simple Rig Generate",
@@ -213,6 +213,7 @@ def createMenu():
     pm.menuItem(label="Synoptic", command=synoptic.open)
     pm.menuItem(divider=True)
     pm.menuItem(label="Soft Tweaks", command=softTweaks.openSoftTweakManager)
+    pm.menuItem(label="Crank: Shot Sculpt", command=crankTool.openUI)
     pm.menuItem(divider=True)
     pm.menuItem(label="Import Mocap Skeleton Biped",
                 command=importSkeletonBiped)
@@ -238,24 +239,14 @@ def createMenu():
     pm.setParent(mGearM, menu=True)
     pm.menuItem(divider=True)
     pm.menuItem(parent="mGear", subMenu=True, tearOff=True, label="Help")
-    pm.menuItem(label="Documentation",
+    pm.menuItem(label="Web",
                 command=partial(
                     openFile,
-                    "https://miquelcampos.github.io/mgear/"))
-    pm.menuItem(label="Release Log",
+                    "http://www.mgear-framework.com/"))
+    pm.menuItem(label="Forum",
                 command=partial(
                     openFile,
-                    "https://miquelcampos.github.io/mgear/releaseLog.html"))
-    pm.menuItem(divider=True)
-    pm.menuItem(label="User Group",
-                command=partial(
-                    openFile,
-                    "https://groups.google.com/forum/#!forum/mgearusergroup"))
-    pm.menuItem(divider=True)
-    pm.menuItem(label="GitHub",
-                command=partial(
-                    openFile,
-                    "https://github.com/miquelcampos/mgear"))
+                    "http://forum.mgear-framework.com/"))
     pm.menuItem(divider=True)
     pm.menuItem(label="About", command=mgear.maya.aboutMgear)
 

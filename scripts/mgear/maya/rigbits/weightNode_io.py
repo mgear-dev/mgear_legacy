@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python
 """
 import weightNode_io
 
@@ -23,6 +23,9 @@ Attributes:
     WNODE_DRIVERPOSE_ATTRS (dict): attrs and their type for querying/setting
     WNODE_SHAPE_ATTRS (list): of attrs to query for re-setting on create
     WNODE_TRANSFORM_ATTRS (list): of transform attrs to record
+
+__author__ = "Rafael Villar"
+__email__ = "rav@ravrigs.com"
 
 """
 # python
@@ -64,7 +67,6 @@ WNODE_TRANSFORM_ATTRS = ["tx",
                          "v"]
 
 WNODE_SHAPE_ATTRS = ['visibility',
-                     # 'instObjGroups',
                      'type',
                      'direction',
                      'invert',
@@ -79,22 +81,10 @@ WNODE_SHAPE_ATTRS = ['visibility',
                      'translateMax',
                      'interpolation',
                      'iconSize',
-                     # 'blendCurve',
-                     # 'blendCurve.blendCurve_Position',
-                     # 'blendCurve.blendCurve_FloatValue',
-                     # 'blendCurve.blendCurve_Interp',
                      'drawCone',
                      'drawCenterCone',
                      'drawWeight',
                      'outWeight',
-                     # 'readerMatrix',
-                     # 'driverMatrix',
-                     # 'input',
-                     # 'restInput',
-                     # 'poses',
-                     # 'poses.poseInput',
-                     # 'poses.poseValue',
-                     # 'output',
                      'twistAxis',
                      'opposite',
                      'rbfMode',
@@ -370,10 +360,14 @@ def setDrivenNode(node, drivenNode, drivenAttrs):
         drivenNode (str): name of node to be driven
         drivenAttrs (list): of attributes to be driven by weightDriver
     """
+    attrs_dict = []
     for index, dAttr in enumerate(drivenAttrs):
         nodePlug = "{}.output[{}]".format(node, index)
         drivenPlug = "{}.{}".format(drivenNode, dAttr)
+        attrs_dict.append(dAttr)
+        attrs_dict.append(mc.getAttr(drivenPlug))
         mc.connectAttr(nodePlug, drivenPlug, f=True)
+    return attrs_dict
 
 
 def getDrivenNode(node):
@@ -445,14 +439,16 @@ def getDrivenNodeAttributes(node):
     """
     attributesToReturn = []
     drivenAttrs = getAttrInOrder(node, "output")
-    attributesToReturn = [attr.attrName(longName=True) for attr in drivenAttrs
-                          if attr.nodeName() != node]
+    for attr in drivenAttrs:
+        if attr.nodeName() != node:
+            attrName = attr.getAlias() or attr.attrName(longName=True)
+            attributesToReturn.append(attrName)
     return attributesToReturn
 
 
 def copyPoses(nodeA, nodeB, emptyPoseValues=True):
     """Copy poses from nodeA to nodeB with the option to be blank or node
-    for syncing nodes
+    for syncing nodes OF EQUAL LENGTH IN POSE INFO
 
     Args:
         nodeA (str): name of weightedNode
@@ -483,10 +479,43 @@ def copyPoses(nodeA, nodeB, emptyPoseValues=True):
                 if attr == "poseInput":
                     valueToSet = pIndexValue
                 elif attr == "poseValue" and emptyPoseValues:
-                    valueToSet = 0.0
+                    if drivenAttrs[index] in rbf_node.SCALE_ATTRS:
+                        valueToSet = 1.0
+                    else:
+                        valueToSet = 0.0
                 if index > nodeBdrivenIndex:
                     continue
                 pm.setAttr(pathToAttr, valueToSet)
+
+
+def syncPoseIndices(srcNode, destNode):
+    """Syncs the pose indices between the srcNode and destNode.
+    The input values will be copied from the srcNode, the poseValues will
+    be defaulted to 0 or 1(if scaleAttr)
+
+    Args:
+        srcNode (str): weightedDriver
+        destNode (str): weightedDriver
+    """
+    src_poseInfo = getPoseInfo(srcNode)
+    destDrivenAttrs = getDrivenNodeAttributes(destNode)
+    for poseIndex, piValues in enumerate(src_poseInfo["poseInput"]):
+        for index, piValue in enumerate(piValues):
+            pathToAttr = "{}.poses[{}].poseInput[{}]".format(destNode,
+                                                             poseIndex,
+                                                             index)
+            pm.setAttr(pathToAttr, piValue)
+
+    for poseIndex, piValues in enumerate(src_poseInfo["poseValue"]):
+        for index, piValAttr in enumerate(destDrivenAttrs):
+            pathToAttr = "{}.poses[{}].poseValue[{}]".format(destNode,
+                                                             poseIndex,
+                                                             index)
+            if piValAttr in rbf_node.SCALE_ATTRS:
+                valueToSet = 1.0
+            else:
+                valueToSet = 0.0
+            pm.setAttr(pathToAttr, valueToSet)
 
 
 def getNodeInfo(node):
@@ -525,6 +554,8 @@ def getNodeInfo(node):
                                                            ENVELOPE_ATTR)
     weightNodeInfo_dict["drivenControlName"] = drivenControlName
     weightNodeInfo_dict["rbfType"] = RBF_TYPE
+    driverPosesInfo = rbf_node.getDriverControlPoseAttr(node.name())
+    weightNodeInfo_dict[rbf_node.DRIVER_POSES_INFO_ATTR] = driverPosesInfo
     return weightNodeInfo_dict
 
 
@@ -715,11 +746,22 @@ def createRBFFromInfo(weightNodeInfo_dict):
         setupName = weightInfo.pop("setupName", "")
         drivenControlName = weightInfo.pop("drivenControlName", "")
         driverControl = weightInfo.pop("driverControl", "")
+        driverControlPoseInfo = weightInfo.pop(rbf_node.DRIVER_POSES_INFO_ATTR,
+                                               {})
         transformNode, node = createRBF(weightNodeName,
                                         transformName=transformName)
         rbf_node.setSetupName(node.name(), setupName)
-        if drivenNodeName and drivenNodeName[0].endswith(DRIVEN_SUFFIX):
+        # create the driven group for the control
+        if (drivenNodeName and
+            drivenNodeName[0].endswith(DRIVEN_SUFFIX) and
+                drivenControlName):
             rbf_node.addDrivenGroup(drivenControlName)
+        elif (drivenNodeName and
+              drivenNodeName[0].endswith(DRIVEN_SUFFIX) and
+              mc.objExists(drivenNodeName[0].replace(DRIVEN_SUFFIX, ""))):
+            drivenControlName = drivenNodeName[0].replace(DRIVEN_SUFFIX, "")
+            rbf_node.addDrivenGroup(drivenControlName)
+
         rbf_node.createRBFToggleAttr(drivenControlName)
         rbf_node.setDriverControlAttr(node.name(), driverControl)
         setTransformNode(transformNode, transformNodeInfo)
@@ -728,6 +770,7 @@ def createRBFFromInfo(weightNodeInfo_dict):
         setPosesFromInfo(node, posesInfo)
         setDriverListFromInfo(node, driverListInfo)
         createVectorDriver(driverInfo)
+        rbf_node.setDriverControlPoseAttr(node.name(), driverControlPoseInfo)
         recreateConnections(connectionsInfo)
         createdNodes.append(node.name())
     return createdNodes
@@ -804,6 +847,9 @@ class RBFNode(rbf_node.RBFNode):
         lengthenCompoundAttrs(self.name)
 
     def addPose(self, poseInput, poseValue, posesIndex=None):
+        if posesIndex is None:
+            posesIndex = len(self.getPoseInfo()["poseInput"])
+        self.updateDriverControlPoseAttr(posesIndex)
         addPose(self.name,
                 poseInput,
                 poseValue,
@@ -831,35 +877,34 @@ class RBFNode(rbf_node.RBFNode):
         setDriverNode(self.name, driverNode, driverAttrs)
 
     def setDrivenNode(self, drivenNode, drivenAttrs, parent=True):
-        setDrivenNode(self.name, drivenNode, drivenAttrs)
+        attrs_dict = setDrivenNode(self.name, drivenNode, drivenAttrs)
         if parent:
             mc.parent(self.transformNode, drivenNode)
         if drivenNode.endswith(DRIVEN_SUFFIX):
             drivenControlName = drivenNode.replace(DRIVEN_SUFFIX, CTL_SUFFIX)
+            drivenOtherName = drivenNode.replace(DRIVEN_SUFFIX, "")
             if not mc.objExists(drivenControlName):
                 return
+            elif mc.objExists(drivenOtherName):
+                drivenControlName = drivenOtherName
             rbf_node.createRBFToggleAttr(drivenControlName)
             rbf_node.connectRBFToggleAttr(drivenControlName,
                                           self.name,
                                           self.getRBFToggleAttr())
+        return attrs_dict
 
     def copyPoses(self, nodeB):
+        poseInfo = self.getDriverControlPoseAttr()
+        nodeB.setDriverControlPoseAttr(poseInfo)
         copyPoses(self.name, nodeB)
-
-    def recallDriverPose(self, poseIndex):
-        driverControl = self.getDriverControlAttr()
-        driverAttrs = self.getDriverNodeAttributes()
-        poseInfo = self.getPoseInfo()
-        poseInput = poseInfo["poseInput"][poseIndex]
-        for index, pValue in enumerate(poseInput):
-            attrPlug = "{}.{}".format(driverControl, driverAttrs[index])
-            try:
-                mc.setAttr(attrPlug, pValue)
-            except Exception:
-                pass
 
     def forceEvaluation(self):
         forceEvaluation(self.transformNode)
 
     def getRBFToggleAttr(self):
         return ENVELOPE_ATTR
+
+    def syncPoseIndices(self, srcNode):
+        poseInfo = srcNode.getDriverControlPoseAttr()
+        self.setDriverControlPoseAttr(poseInfo)
+        syncPoseIndices(srcNode, self.name)

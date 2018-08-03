@@ -1,11 +1,14 @@
+# python
 import traceback
 
+# dcc
 import pymel.core as pm
-import maya.OpenMayaUI as OpenMayaUI
 
+# mgear
 import mgear
 from .. import widgets, utils
-from mgear.vendor.Qt import QtCore, QtWidgets, QtGui, QtCompat
+from mgear.maya import callbackManager
+from mgear.vendor.Qt import QtCore, QtWidgets, QtGui
 
 ##################################################
 # SYNOPTIC TAB WIDGET
@@ -85,12 +88,8 @@ class MainSynopticTab(QtWidgets.QDialog):
         # script job callback
         # ptr = long(QtCompat.getCppPointer(self)[0])
         # ptr = long(QtCompat.getCppPointer(self))
-        ptr = QtCompat.getCppPointer(self)
-
-        gui = OpenMayaUI.MQtUtil.fullName(ptr)
-        self.selJob = pm.scriptJob(e=("SelectionChanged",
-                                      self.selectChanged),
-                                   parent=gui)
+        # ptr = QtCompat.getCppPointer(self)
+        self.cbManager = callbackManager.CallbackManager()
 
     def selectChanged(self, *args):
         # wrap to catch exception guaranteeing maya does not stop at this
@@ -99,13 +98,15 @@ class MainSynopticTab(QtWidgets.QDialog):
 
         except Exception as e:
             mes = traceback.format_exc()
-            mes = "error has occur in scriptJob " \
+            mes = "error has occur in Callback " \
                   "SelectionChanged\n{0}".format(mes)
 
             mes = "{0}\n{1}".format(mes, e)
-            mgear.log(mes, mgear.sev_error)
-            pm.scriptJob(kill=self.selJob)
-            self.close()
+            self.cbManager.removeAllManagedCB()
+            try:
+                self.close()
+            except RuntimeError:
+                pass
 
     def __selectChanged(self, *args):
 

@@ -10,7 +10,8 @@ from pymel.core import datatypes
 
 import mgear
 import mgear.maya.icon as ico
-from mgear.maya import transform, node, attribute, applyop, utils, pyqt, curve
+from mgear.maya import transform, node, attribute, applyop, pyqt, utils, curve
+from mgear.maya import shifter
 from mgear import string
 from . import simpleRigUI as srUI
 from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
@@ -19,21 +20,33 @@ from maya.app.general.mayaMixin import MayaQWidgetDockableMixin
 CTL_TAG_ATTR = "is_simple_rig_ctl"
 RIG_ROOT = "rig"
 
-# TODO: add control tags
-
 
 # driven attr ===========================================
 
 def _driven_attr(dagNode):
-    # message attribute to store a list of object affected by the root or pivot
+    """message attribute to store a list of object affected
+    by the root or pivot
+
+    Args:
+        dagNode (PyNode): dagNode
+
+    Returns:
+        Attr: Attribute
+    """
     if not dagNode.hasAttr("drivenElements"):
         dagNode.addAttr("drivenElements", attributeType='message', multi=True)
     return dagNode.attr("drivenElements")
 
 
 def _add_to_driven_attr(dagNode, driven):
-    # add one or more elements to the driven list
-    # should check is not in another driven attr and remove from others
+    """add one or more elements to the driven list
+    should check is not in another driven attr and remove from others
+
+    Args:
+        dagNode (PyNode): dagNode with the attribute
+        driven (PyNode): driven elements
+    """
+
     d_attr = _driven_attr(dagNode)
     if not isinstance(driven, list):
         driven = [driven]
@@ -49,7 +62,12 @@ def _add_to_driven_attr(dagNode, driven):
 
 
 def _remove_from_driven_attr(driven):
-    # remove one or more elements to the driven attr
+    """Remove one or more elements to the driven attr
+
+    Args:
+        driven (list of dagNode): Driven elements
+    """
+
     if not isinstance(driven, list):
         driven = [driven]
     for x in driven:
@@ -59,13 +77,28 @@ def _remove_from_driven_attr(driven):
 
 
 def _get_from_driven_attr(dagNode):
-    # return a list of all elements in the driven attr as PyNodes
+    """Return a list of all elements in the driven attr as PyNodes
+
+    Args:
+        dagNode (PyNode): Driver dagNode
+
+    Returns:
+        TYPE: Description
+    """
+
     d_attr = _driven_attr(dagNode)
     return d_attr.inputs()
 
 
 def _get_driven_attr_next_available_index(d_attr):
-    # get the next available index for the drivenElements attr
+    """Get the next available index for the drivenElements attr
+
+    Args:
+        d_attr (attr): driven attribute
+
+    Returns:
+        int: next available index
+    """
     return attribute.get_next_available_index(d_attr)
 
 
@@ -82,6 +115,24 @@ def _create_control(name,
                     color=17,
                     driven=None,
                     sets_config=None):
+    """Crete control
+
+    Args:
+        name (str): Name of the control
+        t (matrix): transform matrix
+        radio (double): Size Radio
+        parent (dagNode, optional): Parent Control
+        icon (str, optional): Icon shape
+        side (str, optional): Side. Can be C, L or R
+        indx (int, optional): Index
+        color (int, optional): Colort
+        driven (None, optional): Driven elements
+        sets_config (None, optional): Groups/sets where the new control will be
+            added
+
+    Returns:
+        dagNode: New control
+    """
     name = _validate_name(name)
 
     def _set_name(extension):
@@ -110,6 +161,7 @@ def _create_control(name,
                      d=radio * 2)
 
     attribute.addAttribute(ctl, "conf_icon", "string", icon)
+    attribute.addAttribute(ctl, "conf_sets", "string", sets_config)
     attribute.addAttribute(ctl, "conf_radio", "float", radio, keyable=False)
     attribute.addAttribute(ctl, "conf_color", "long", color, keyable=False)
     attribute.addAttribute(ctl, CTL_TAG_ATTR, "bool", True, keyable=False)
@@ -132,49 +184,17 @@ def _create_control(name,
     return ctl
 
 
-# @utils.one_undo
-def _create_simple_rig_root(rigName=RIG_ROOT,
-                            selection=None,
-                            world_ctl=True,
-                            sets_config=None,
-                            ctl_wcm=False,
-                            fix_radio=False,
-                            radio_val=100,
-                            gl_shape="square",
-                            w_shape="circle"):
-    # create the simple rig root
-    # have the attr: is_simple_rig and is_rig
-    # should not create if there is a another simple rig root
-    # should have synoptic attr. (synoptic configuration in UI)
-    # use World_ctl should be optional
+def _create_base_structure(rigName):
+    """Create base structure
 
-    # check if there is another rig root in the scene
-    rig_models = _get_simple_rig_root()
-    if rig_models:
-        pm.displayWarning("Simple rig root already exist in the "
-                          "scene: {}".format(str(rig_models)))
-        return
+    Args:
+        rigName (str): Rig name
 
-    if not selection:
-        if pm.selected():
-            selection = pm.selected()
-        else:
-            pm.displayWarning("Selection is needed to create the root")
-            return
+    Returns:
+        dagNode: rig root
+    """
 
-    volCenter, radio, bb = _get_branch_bbox_data(selection)
-
-    if fix_radio:
-        radio = radio_val
-
-    meshList = []
-    ctlList = []
-
-    # Create base structure
     rig = pm.createNode('transform', n=rigName)
-    # geo = pm.createNode('transform', n="geo", p=rig)
-    # geo.attr("overrideEnabled").set(1)
-    # geo.attr("overrideDisplayType").set(2)
 
     attribute.addAttribute(rig, "is_rig", "bool", True, keyable=False)
     attribute.addAttribute(rig, "is_simple_rig", "bool", True, keyable=False)
@@ -205,18 +225,10 @@ def _create_simple_rig_root(rigName=RIG_ROOT,
     rig.addAttr("rigPoses", at='message', m=1)
     rig.addAttr("rigCtlTags", at='message', m=1)
 
-    if ctl_wcm:
-        t = datatypes.Matrix()
-    else:
-        t = transform.getTransformFromPos(volCenter)
-
-    # configure selectable geo
-    for e in selection:
-        pm.connectAttr(rig.geoUnselectable, e.attr("overrideEnabled"))
-        e.attr("overrideDisplayType").set(2)
-
     # Create sets
-    # meshSet = pm.sets(meshList, n="CACHE_grp")
+    meshList = []
+    ctlList = []
+
     ctlSet = pm.sets(ctlList, n="{}_controllers_grp".format(rigName))
     deformersSet = pm.sets(meshList, n="{}_deformers_grp".format(rigName))
     compGroup = pm.sets(meshList, n="{}_componentsRoots_grp".format(rigName))
@@ -226,14 +238,82 @@ def _create_simple_rig_root(rigName=RIG_ROOT,
 
     pm.connectAttr(rigSets.attr("message"),
                    "{}.rigGroups[0]".format(rigName))
-    # pm.connectAttr(meshSet.attr("message"),
-    #                "{}.rigGroups[1]".format(rigName))
     pm.connectAttr(ctlSet.attr("message"),
                    "{}.rigGroups[2]".format(rigName))
     pm.connectAttr(deformersSet.attr("message"),
                    "{}.rigGroups[3]".format(rigName))
     pm.connectAttr(compGroup.attr("message"),
                    "{}.rigGroups[4]".format(rigName))
+
+    return rig
+
+
+@utils.one_undo
+def _create_simple_rig_root(rigName=RIG_ROOT,
+                            selection=None,
+                            world_ctl=True,
+                            sets_config=None,
+                            ctl_wcm=False,
+                            fix_radio=False,
+                            radio_val=100,
+                            gl_shape="square",
+                            w_shape="circle"):
+    """Create the simple rig root
+
+    create the simple rig root
+    have the attr: is_simple_rig and is_rig
+    should not create if there is a another simple rig root
+    should have synoptic attr. (synoptic configuration in UI)
+    use World_ctl should be optional
+
+    Args:
+        rigName (str, optional): Rig Name
+        selection (dagNode list, optional): Elements selected to be included
+            in the rig
+        world_ctl (bool, optional): if True, will create world_ctl
+        sets_config (None, optional): Groups to include the ctl
+        ctl_wcm (bool, optional): If True, the world_ctl will ve placed in the
+            scene world center
+        fix_radio (bool, optional): If True, will use a fix radio value,
+            instead of the bbox radio
+        radio_val (int, optional): Fix value for Radio
+        gl_shape (str, optional): Global and local control shape
+        w_shape (str, optional): World control shape
+
+    Returns:
+        dagNode: local control
+    """
+
+    # check if there is another rig root in the scene
+    rig_models = _get_simple_rig_root()
+    if rig_models:
+        pm.displayWarning("Simple rig root already exist in the "
+                          "scene: {}".format(str(rig_models)))
+        return
+
+    if not selection:
+        if pm.selected():
+            selection = pm.selected()
+        else:
+            pm.displayWarning("Selection is needed to create the root")
+            return
+
+    volCenter, radio, bb = _get_branch_bbox_data(selection)
+
+    if fix_radio:
+        radio = radio_val
+
+    rig = _create_base_structure(rigName)
+
+    if ctl_wcm:
+        t = datatypes.Matrix()
+    else:
+        t = transform.getTransformFromPos(volCenter)
+
+    # configure selectable geo
+    for e in selection:
+        pm.connectAttr(rig.geoUnselectable, e.attr("overrideEnabled"))
+        e.attr("overrideDisplayType").set(2)
 
     ctt = None
     # create world ctl
@@ -248,7 +328,6 @@ def _create_simple_rig_root(rigName=RIG_ROOT,
                                     color=13,
                                     driven=None,
                                     sets_config=sets_config)
-        # ctlList.append(world_ctl)
         if versions.current() >= 201650:
             ctt = node.add_controller_tag(world_ctl, None)
             _connect_tag_to_rig(rig, ctt)
@@ -266,7 +345,6 @@ def _create_simple_rig_root(rigName=RIG_ROOT,
                                  color=17,
                                  driven=None,
                                  sets_config=sets_config)
-    # ctlList.append(global_ctl)
     if versions.current() >= 201650:
         ctt = node.add_controller_tag(global_ctl, ctt)
         _connect_tag_to_rig(rig, ctt)
@@ -282,7 +360,6 @@ def _create_simple_rig_root(rigName=RIG_ROOT,
                                 color=17,
                                 driven=selection,
                                 sets_config=sets_config)
-    # ctlList.append(local_ctl)
     if versions.current() >= 201650:
         ctt = node.add_controller_tag(local_ctl, ctt)
         _connect_tag_to_rig(rig, ctt)
@@ -290,7 +367,7 @@ def _create_simple_rig_root(rigName=RIG_ROOT,
     return local_ctl
 
 
-# @utils.one_undo
+@utils.one_undo
 def _create_custom_pivot(name,
                          side,
                          icon,
@@ -298,6 +375,23 @@ def _create_custom_pivot(name,
                          selection=None,
                          parent=None,
                          sets_config=None):
+    """Create a custom pivot control
+
+    Args:
+        name (str): Custompivot control name
+        side (str): Side. can be C, L or R
+        icon (str): Control shape
+        yZero (bool): If True, the control will be placed in the lowest
+            position of the bbox
+        selection (list of dagNode, optional): Elements affected by the
+            custom pivot
+        parent (dagNode, optional): Parent of the custom pivot. Should be
+            another ctl
+        sets_config (str, optional): Sets to add the controls
+
+    Returns:
+        TYPE: Description
+    """
     # should have an options in UI and store as attr for rebuild
     #   -side
     #   -Control Shape
@@ -314,8 +408,7 @@ def _create_custom_pivot(name,
         if selection and _is_valid_ctl(selection[-1]):
             parent = selection[-1]
             selection = selection[:-1]
-        # elif pm.ls("local_C0_ctl"):
-        #     parent = pm.PyNode("local_C0_ctl")
+
         else:
             pm.displayWarning("The latest selected element should be a CTL. "
                               "PARENT is needed!")
@@ -358,8 +451,14 @@ def _create_custom_pivot(name,
 # Getters ===========================================
 
 def _get_simple_rig_root():
-    # get the root from the scene.
-    # If there is more than one It will return none and print warning
+    """get the root from the scene.
+
+    If there is more than one It will return none and print warning
+
+    Returns:
+        dagNode: Rig root
+    """
+
     rig_models = [item for item in pm.ls(transforms=True)
                   if _is_simple_rig_root(item)]
     if rig_models:
@@ -367,7 +466,15 @@ def _get_simple_rig_root():
 
 
 def _get_children(dagNode):
-    # get all children node
+    """Get all children node
+
+    Args:
+        dagNode (PyNode): dagNode to get the childrens
+
+    Returns:
+        list of dagNode: children dagNodes
+    """
+
     children = dagNode.listRelatives(allDescendents=True,
                                      type="transform")
     return children
@@ -381,12 +488,16 @@ def _get_bbox_data(obj=None, yZero=True, *args):
         yZero (bool, optional): If true, sets the hight to the lowest point
         *args: Maya dummy
 
+    Returns:
+        mutiy: volumen center vector position, radio and bounding box (bbox)
+
     """
     volCenter = False
 
     if not obj:
         obj = pm.selected()[0]
     shapes = pm.listRelatives(obj, ad=True, s=True)
+    shapes = [shp for shp in shapes if shp.type() == "mesh"]
     if shapes:
         bb = pm.polyEvaluate(shapes, b=True)
         volCenter = [(axis[0] + axis[1]) / 2 for axis in bb]
@@ -394,11 +505,21 @@ def _get_bbox_data(obj=None, yZero=True, *args):
             volCenter[1] = bb[1][0]
         radio = max([bb[0][1] - bb[0][0], bb[2][1] - bb[2][0]]) / 1.7
 
-    return volCenter, radio, bb
+        return volCenter, radio, bb
+    return volCenter, None, None
 
 
 def _get_branch_bbox_data(selection=None, yZero=True, *args):
+    """Get the bounding box from a hierachy branch
 
+    Args:
+        selection (None, optional): Description
+        yZero (bool, optional): Description
+        *args: Description
+
+    Returns:
+        multi: Absolute center, absoulte radio and absolute bbox
+    """
     absBB = None
     absCenter = None
     absRadio = 0.5
@@ -416,25 +537,24 @@ def _get_branch_bbox_data(selection=None, yZero=True, *args):
     for e in bbox_elements:
         if not _is_valid_ctl(e):
             bbCenter, bbRadio, bb = _get_bbox_data(e)
-            if not absBB:
-                absBB = bb
-            else:
-                absBB = [[min(bb[0][0], absBB[0][0]),
-                          max(bb[0][1], absBB[0][1])],
-                         [min(bb[1][0], absBB[1][0]),
-                          max(bb[1][1], absBB[1][1])],
-                         [min(bb[2][0], absBB[2][0]),
-                          max(bb[2][1], absBB[2][1])]]
-            # if absCenter:
-            #     absCenter = [0, 0, 0]
-            # else:
-            absCenter = [(axis[0] + axis[1]) / 2 for axis in absBB]
-            absRadio = max([absBB[0][1] - absBB[0][0],
-                            absBB[2][1] - absBB[2][0]]) / 1.7
+            if bbCenter:
+                if not absBB:
+                    absBB = bb
+                else:
+                    absBB = [[min(bb[0][0], absBB[0][0]),
+                              max(bb[0][1], absBB[0][1])],
+                             [min(bb[1][0], absBB[1][0]),
+                              max(bb[1][1], absBB[1][1])],
+                             [min(bb[2][0], absBB[2][0]),
+                              max(bb[2][1], absBB[2][1])]]
 
-            # set the cencter in the floor
-            if yZero:
-                absCenter[1] = absBB[1][0]
+                absCenter = [(axis[0] + axis[1]) / 2 for axis in absBB]
+                absRadio = max([absBB[0][1] - absBB[0][0],
+                                absBB[2][1] - absBB[2][0]]) / 1.7
+
+                # set the cencter in the floor
+                if yZero:
+                    absCenter[1] = absBB[1][0]
 
     return absCenter, absRadio, absBB
 
@@ -442,7 +562,12 @@ def _get_branch_bbox_data(selection=None, yZero=True, *args):
 # Build and IO ===========================================
 
 def _collect_configuration_from_rig():
-    # TODO: collects the simple rig configuration in a dictionary
+    """Collects the configuration from the rig and create a dictionary with it
+
+    Returns:
+        dict: Configuration dictionary
+    """
+
     rig_conf_dict = {}
     ctl_settings = {}
     # get root and name
@@ -462,18 +587,24 @@ def _collect_configuration_from_rig():
             ctl_names_list.append(ctl_name)
 
             conf_icon = c.conf_icon.get()
+            # back compatible:
+            if c.hasAttr("conf_sets"):
+                conf_sets = c.conf_sets.get()
+            else:
+                conf_sets = ""
             conf_radio = c.conf_radio.get()
             conf_color = c.conf_color.get()
             ctl_color = curve.get_color(c)
-            ctl_side = ctl_name.split("_")[-2][0]
-            ctl_index = ctl_name.split("_")[-2][1:]
+            if len(ctl_name.split("_")) == 2:
+                ctl_side = None
+                ctl_index = 0
+            else:
+                ctl_side = ctl_name.split("_")[-2][0]
+                ctl_index = ctl_name.split("_")[-2][1:]
             ctl_short_name = ctl_name.split("_")[0]
             ctl_parent = c.getParent(2).name()
-            # ctl transform matrix
             m = c.getMatrix(worldSpace=True)
             ctl_transform = m.get()
-            # sets list
-            sets_list = [s.name() for s in c.listConnections(type="objectSet")]
 
             # driven list
             driven_list = [n.name() for n in _get_from_driven_attr(c)]
@@ -483,29 +614,27 @@ def _collect_configuration_from_rig():
                               "edit pivot mode or not reset SRT "
                               "Finish edit pivot for or reset "
                               "SRT: {}".format(c))
-            return
-        shps, shps_n = curve.collect_curve_shapes(c)
+            return None
+        shps = curve.collect_curve_data(c)
         conf_ctl_dict = {"conf_icon": conf_icon,
                          "conf_radio": conf_radio,
                          "conf_color": conf_color,
                          "ctl_color": ctl_color,
                          "ctl_side": ctl_side,
                          "ctl_shapes": shps,
-                         "ctl_shapes_names": shps_n,
                          "ctl_index": ctl_index,
                          "ctl_parent": ctl_parent,
                          "ctl_transform": ctl_transform,
                          "ctl_short_name": ctl_short_name,
                          "driven_list": driven_list,
-                         "sets_list": sets_list}
+                         "sets_list": conf_sets}
 
         ctl_settings[ctl_name] = conf_ctl_dict
 
     rig_conf_dict["ctl_list"] = ctl_names_list
     rig_conf_dict["ctl_settings"] = ctl_settings
-    data_string = json.dumps(rig_conf_dict, indent=4, sort_keys=True)
+    rig_conf_dict["root_name"] = rig_root.name()
 
-    print data_string
     return rig_conf_dict
 
 
@@ -520,7 +649,27 @@ def _build_rig_from_model(dagNode,
                           gl_shape="square",
                           world_ctl=True,
                           w_shape="circle"):
-    # using suffix keyword from a given model build a rig.
+    """Build a rig from a model structure.
+
+     using suffix keyword from a given model build a rig.
+
+    Args:
+        dagNode (dagNode): model root node
+        rigName (str, optional): Name of the rig
+        suffix (str, optional): suffix to check inside the model structure
+            in order identify the custom pivots
+        sets_config (str, optional): list of sets in string separated by ","
+        ctl_wcm (bool, optional): If True, the world_ctl will ve placed in the
+            scene world center
+        fix_radio (bool, optional): If True, will use a fix radio value,
+            instead of the bbox radio
+        radio_val (int, optional): Fix value for Radio
+        gl_shape (str, optional): Global and local control shape
+        world_ctl (bool, optional): if True, will create world_ctl
+        w_shape (str, optional): World control shape
+        sets_config (None, optional): Groups to include the ctl
+    """
+
     suf = "_{}".format(string.removeInvalidCharacter(suffix))
     pm.displayInfo("Searching elements using suffix: {}".format(suf))
 
@@ -554,47 +703,269 @@ def _build_rig_from_model(dagNode,
                 parent_dict[d.name()] = ctl
 
 
-def _build_rig_from_configuration():
-    # TODO: build the rig from a configuration
-    # can be from scene configuration or from imported
-    # create rig root
-    return
+def _build_rig_from_configuration(configDict):
+    """Buiold rig from configuration
+
+    Args:
+        configDict (dict): The configuration dictionary
+    """
+    _create_base_structure(configDict["root_name"])
+    for c in configDict["ctl_list"]:
+        ctl_conf = configDict["ctl_settings"][c]
+        driven = []
+        for drv in ctl_conf["driven_list"]:
+            obj = pm.ls(drv)
+            if obj:
+                driven.append(obj[0])
+            else:
+                pm.displayWarning("Driven object {}: "
+                                  "Can't be found.".format(drv))
+        t = datatypes.Matrix(ctl_conf["ctl_transform"])
+        _create_control(ctl_conf["ctl_short_name"],
+                        t,
+                        ctl_conf["conf_radio"],
+                        ctl_conf["ctl_parent"],
+                        ctl_conf["conf_icon"],
+                        ctl_conf["ctl_side"],
+                        indx=ctl_conf["ctl_index"],
+                        color=ctl_conf["ctl_color"],
+                        driven=driven,
+                        sets_config=ctl_conf["sets_list"])
+        curve.update_curve_from_data(ctl_conf["ctl_shapes"])
 
 
-def export_configuration():
-    # TODO: export configuration to json
-    _collect_configuration_from_rig()
+def export_configuration(filePath=None):
+    """Export configuration to json file
+
+    Args:
+        filePath (str, optional): Path to save the file
+
+    """
+
+    rig_conf_dict = _collect_configuration_from_rig()
+    data_string = json.dumps(rig_conf_dict, indent=4, sort_keys=True)
+    if not filePath:
+        startDir = pm.workspace(q=True, rootDirectory=True)
+        filePath = pm.fileDialog2(
+            dialogStyle=2,
+            fileMode=0,
+            startingDirectory=startDir,
+            fileFilter='Simple Rig Configuration .src (*%s)' % ".src")
+    if not filePath:
+        return
+    if not isinstance(filePath, basestring):
+        filePath = filePath[0]
+    f = open(filePath, 'w')
+    f.write(data_string)
+    f.close()
 
 
-def import_configuration():
-    # TODO: import configuration
-    return
+def import_configuration(filePath=None):
+    """Import configuration from filePath
+
+    Args:
+        filePath (str, optional): File path to the configuration json file
+    """
+
+    if not filePath:
+        startDir = pm.workspace(q=True, rootDirectory=True)
+        filePath = pm.fileDialog2(
+            dialogStyle=2,
+            fileMode=1,
+            startingDirectory=startDir,
+            fileFilter='Simple Rig Configuration .src (*%s)' % ".src")
+    if not filePath:
+        return
+    if not isinstance(filePath, basestring):
+        filePath = filePath[0]
+    configDict = json.load(open(filePath))
+    _build_rig_from_configuration(configDict)
 
 
 # Convert to SHIFTER  ===========================================
 
-def _shifter_control_component():
-    # TODO: creates shifter control_01 component and sets the correct settings
-    return
+def _shifter_init_guide(name, worldCtl=False):
+    """Initialize shifter guide
+
+    Args:
+        name (str): Name for the rig
+        worldCtl (bool, optional): if True, will set the guide to use world_ctl
+
+    Returns:
+        TYPE: Description
+    """
+    guide = shifter.guide.Rig()
+    guide.initialHierarchy()
+    model = guide.model
+    # set there attribute for guide root
+    model.rig_name.set(name)
+    model.worldCtl.set(worldCtl)
+
+    return guide
+
+
+def _shifter_control_component(name,
+                               side,
+                               indx,
+                               t,
+                               guide,
+                               parent=None,
+                               grps=""):
+    """creates shifter control_01 component and sets the correct settings
+
+    Args:
+        name (str): Name of the component
+        side (str): side
+        indx (int): index
+        t (matrix): Transform Matrix
+        guide (guide): Shifter guide object
+        parent (dagNode, optional): Parent
+        grps (str, optional): groups
+
+    Returns:
+        TYPE: Description
+    """
+
+    comp_guide = guide.getComponentGuide("control_01")
+    if parent is None:
+        parent = guide.model
+    if not isinstance(parent, str):
+        parent = pm.PyNode(parent)
+
+    comp_guide.draw(parent)
+    comp_guide.rename(comp_guide.root, name, side, indx)
+    root = comp_guide.root
+    # set the attributes for component
+    root.setMatrix(t, worldSpace=True)
+    root.neutralRotation.set(False)
+    root.joint.set(True)
+    root.ctlGrp.set(grps)
+
+    return root
 
 
 def convert_to_shifter_guide():
-    # TODO: convert from configuration
-    # convert the configuration to a shifter guide.
-    # extractig the ctl shapes
-    return
+    """Convert the configuration to a shifter guide.
+
+    Returns:
+        multi: guide and configuration dictionary
+    """
+
+    # get configuration dict
+    configDict = _collect_configuration_from_rig()
+
+    if configDict:
+
+        # Create the guide
+        root_name = configDict["root_name"]
+        if "world_ctl" in configDict["ctl_list"]:
+            worldCtl = True
+            # we asume the world_ctl is always the first in the list
+            configDict["ctl_list"] = configDict["ctl_list"][1:]
+        else:
+            worldCtl = False
+        guide = _shifter_init_guide(root_name, worldCtl)
+
+        # dic to store the parent relation from the original rig to the guide
+        parentRelation = {}
+        if worldCtl:
+            parentRelation["world_ctl"] = guide.model
+        else:
+            first_ctl = configDict["ctl_list"][0]
+            p = configDict["ctl_settings"][first_ctl]["ctl_parent"]
+            parentRelation[p] = guide.model
+        # create components
+        for c in configDict["ctl_list"]:
+            ctl_conf = configDict["ctl_settings"][c]
+            t = datatypes.Matrix(ctl_conf["ctl_transform"])
+            # we need to parse the grps list in order to extract the first grp
+            # without sub groups. Shifter doesn't support this feature yet
+            grps = ctl_conf["sets_list"]
+            grps = [g.split(".")[-1] for g in grps.split(",")][0]
+            root = _shifter_control_component(
+                ctl_conf["ctl_short_name"],
+                ctl_conf["ctl_side"],
+                int(ctl_conf["ctl_index"]),
+                t,
+                guide,
+                parent=parentRelation[ctl_conf["ctl_parent"]],
+                grps=grps)
+            parentRelation[c] = root
+
+        return guide, configDict
+    else:
+        return None, None
 
 
+# @utils.one_undo
 def convert_to_shifter_rig():
-    # TODO: will create the guide and build the rig from configuration
-    # skinning automatic base on driven attr
-    return
+    """Convert simple rig to Shifter rig
+
+    It will create the guide and build the rig from configuration
+    skinning automatic base on driven attr
+    """
+
+    simple_rig_root = _get_simple_rig_root()
+    if simple_rig_root:
+        guide, configDict = convert_to_shifter_guide()
+        if guide:
+            # ensure the objects are removed from the original rig
+            for c in configDict["ctl_list"]:
+                ctl_conf = configDict["ctl_settings"][c]
+                for d in ctl_conf["driven_list"]:
+                    driven = pm.ls(d)
+                    if driven and driven[0].getParent(-1).hasAttr(
+                            "is_simple_rig"):
+                        pm.displayWarning("{}: cut for old rig hierarchy"
+                                          "to avoid delete it when delete "
+                                          "the old rig!!")
+                        pm.parent(driven, w=True)
+
+            # delete original rig
+            pm.delete(simple_rig_root)
+
+            # build guide
+            pm.select(guide.model)
+            rig = shifter.Rig()
+            rig.buildFromSelection()
+
+            # skin driven to new rig and  apply control shapes
+            for c in configDict["ctl_list"]:
+                ctl_conf = configDict["ctl_settings"][c]
+                for d in ctl_conf["driven_list"]:
+                    driven = pm.ls(d)
+                    jnt = pm.ls(c.replace("ctl", "0_jnt"))
+                    if driven and jnt:
+                        try:
+                            pm.skinCluster(jnt[0],
+                                           driven[0],
+                                           tsb=True,
+                                           nw=2,
+                                           n='{}_skinCluster'.format(d))
+                        except RuntimeError:
+                            pm.displayWarning("Automatic skinning, can't be "
+                                              "created for"
+                                              " {}. Skipped.".format(d))
+
+                curve.update_curve_from_data(ctl_conf["ctl_shapes"])
+        else:
+            pm.displayWarning("The guide can not be extracted. Check log!")
+    else:
+        pm.displayWarning("No simple root to convert!")
 
 
 # Edit ===========================================
 
 def _remove_element_from_ctl(ctl, dagNode):
+    """Remove element from a rig control
 
+    Args:
+        ctl (dagNode): Control to remove the  element
+        dagNode (dagNode): Element to be removed
+
+    Returns:
+        TYPE: Description
+    """
     # Check the ctl is reset
     if not _is_in_npo(ctl):
         pm.displayWarning("{}: have SRT values. Reset, before edit "
@@ -616,7 +987,14 @@ def _remove_element_from_ctl(ctl, dagNode):
 
 
 def _add_element_to_ctl(ctl, dagNode):
-    # encusre the element is not yet in pivot
+    """Add element to control
+
+    Args:
+        ctl (dagNode): Control to add element
+        dagNode (dagNode): Element to add to the control
+
+    """
+    # ensure the element is not yet in pivot
     driven = _get_from_driven_attr(ctl)
     # Check the ctl is reset
     if not _is_in_npo(ctl):
@@ -631,8 +1009,17 @@ def _add_element_to_ctl(ctl, dagNode):
 
 
 def _delete_pivot(dagNode):
-    # should move all dependent elements and children pivots to his parent
-    # element or move to the root if there is not parent pivot
+    """Remove custom pivot control
+
+    It will move all dependent elements and children pivots to his parent
+    element or move to the root if there is not parent pivot
+
+    Args:
+        dagNode (PyNode): Control to be removed
+
+    Returns:
+        TYPE: Description
+    """
 
     if _is_valid_ctl(dagNode):
         # get children pivots
@@ -655,8 +1042,15 @@ def _delete_pivot(dagNode):
 
 
 def _parent_pivot(pivot, parent):
-    # reparent pivot to another pivot or root
-    # should avoid to parent under world_ctl or local_C0_ctl
+    """Reparent pivot to another pivot or root
+
+    Should avoid to parent under world_ctl or local_C0_ctl
+
+
+    Args:
+        pivot (dagNode): Custom pivot control
+        parent (dagNode): New parent
+    """
 
     # check it parent is valid pivot
     if _is_valid_ctl(parent):
@@ -682,14 +1076,23 @@ def _parent_pivot(pivot, parent):
 
 
 def _edit_pivot_position(ctl):
-    # set the pivot in editable mode
-    # check that is in neutral pose
+    """Edit control pivot
+
+    set the pivot in editable mode
+    check that is in neutral pose
+
+    Args:
+        ctl (dagNode): Pivot to edit
+
+
+    """
+
     if not _is_in_npo(ctl):
         pm.displayWarning("The control: {} should be in reset"
                           " position".format(ctl.name()))
         return
     if not ctl.attr("edit_mode").get():
-        # move childs to parent
+        # move child to parent
         children = ctl.listRelatives(type="transform")
         if children:
             pm.parent(children, ctl.getParent())
@@ -707,7 +1110,12 @@ def _edit_pivot_position(ctl):
 
 
 def _consolidate_pivot_position(ctl):
-    # consolidate the pivot position after editing
+    """Consolidate the pivot position after editing
+
+    Args:
+        ctl (dagNode): control to consolidate the new pivot position
+    """
+    #
 
     if ctl.attr("edit_mode").get():
         # unparent the  children
@@ -733,9 +1141,12 @@ def _consolidate_pivot_position(ctl):
                           " Edit pivot Mode".format(ctl.name()))
 
 
+@utils.one_undo
 def _delete_rig():
-    # delete the rig and clean all connections on the geometry
-    # rig = pm.ls(RIG_ROOT)
+    """Delete the rig
+
+    Delete the rig and clean all connections on the geometry
+    """
     rig = _get_simple_rig_root()
     if rig:
         confirm = pm.confirmDialog(title='Confirm Delete Simple Rig',
@@ -771,29 +1182,64 @@ def _delete_rig():
 
 
 def _connect_tag_to_rig(rig, ctt):
+    """Connect control tag
 
+    """
     ni = attribute.get_next_available_index(rig.rigCtlTags)
     pm.connectAttr(ctt.message,
                    rig.attr("rigCtlTags[{}]".format(str(ni))))
 
 
 def _validate_name(name):
-    # check and correct bad formating
+    """Check and correct bad name formating
+
+    Args:
+        name (str): Name
+
+    Returns:
+        str: Corrected Name
+    """
+
     return string.removeInvalidCharacter(name)
 
 
 def _is_valid_ctl(dagNode):
-    # check if the dagNode is a simple rig ctl
+    """Check if the dagNode is a simple rig ctl
+
+    Args:
+        dagNode (PyNode): Control to check
+
+    Returns:
+        bool: True is has the expected tag attr
+    """
     return dagNode.hasAttr(CTL_TAG_ATTR)
 
 
 def _is_simple_rig_root(dagNode):
-    # check if the dagNode is a simple rig ctl
+    """Check if the dagNode is a simple rig ctl
+
+    Args:
+        dagNode (PyNode): Control to check
+
+    Returns:
+        bool: Return true if is simple rig
+    """
+
     return dagNode.hasAttr("is_simple_rig")
 
 
 def _is_in_npo(dagNode):
-    # check if the SRT is reset
+    """check if the SRT is reset
+
+    SRT = Scale, Rotation, Translation
+
+    Args:
+        dagNode (PyNode): control to check
+
+    Returns:
+        bool: neutral pose status
+    """
+    #
     trAxis = ["tx", "ty", "tz", "rx", "ry", "rz"]
     sAxis = ["sx", "sy", "sz"]
     npo_status = True
@@ -821,7 +1267,14 @@ def _is_in_npo(dagNode):
 # groups ==============================================
 
 def _get_sets_grp(grpName="controllers_grp"):
-    # node = pm.PyNode(RIG_ROOT)
+    """Get set group
+
+    Args:
+        grpName (str, optional): group name
+
+    Returns:
+        PyNode: Set
+    """
     rig = _get_simple_rig_root()
     sets = rig.listConnections(type="objectSet")
 
@@ -834,7 +1287,15 @@ def _get_sets_grp(grpName="controllers_grp"):
 
 
 def _extra_sets(sets_config):
-    # sets_config = "animSets.basic.test,animSets.facial"
+    """Configure the extra sets from string
+
+    exp: sets_config = "animSets.basic.test,animSets.facial"
+    Args:
+        sets_config (str): extra sets configuration
+
+    Returns:
+        list: extra sets list
+    """
     sets_grp = _get_sets_grp("sets_grp")
     sets_list = sets_config.split(",")
     last_sets_list = []
@@ -858,9 +1319,17 @@ def _extra_sets(sets_config):
 # Connect ===========================================
 
 def _connect_driven(driver, driven):
-    # Connect the driven element with multiply matrix
-    # before connect check if the driven is valid.
-    # I.E. only elements not under geoRoot.
+    """Connect the driven element with multiply matrix
+
+    Before connect check if the driven is valid.
+    I.E. only elements not under geoRoot.
+
+    Args:
+        driver (PyNode): Driver control
+        driven (PyNode): Driven control
+
+    """
+
     if _is_valid_ctl(driven):
         pm.displayWarning("{} can't not be driven or connected to a ctl, "
                           "because is a simple rig control".format(driven))
@@ -904,7 +1373,14 @@ def _connect_driven(driver, driven):
 
 
 def _disconnect_driven(driven):
-    # delete the matrix mult nodes
+    """Disconnect driven control
+
+    delete the matrix mult nodes
+
+    Args:
+        driven (PyNode): Driven control to disconnect
+    """
+
     mOperatorNodes = "mOperatorNodes"
     if driven.hasAttr(mOperatorNodes):
         pm.delete(driven.attr(mOperatorNodes).inputs())
@@ -912,7 +1388,12 @@ def _disconnect_driven(driven):
 
 # @utils.one_undo
 def _update_driven(driver):
-    # update the driven connections using the driver drivenElements attr
+    """Update the driven connections using the driver drivenElements attr
+
+    Args:
+        driver (PyNode): Driver control
+    """
+
     driven = _get_from_driven_attr(driver)
     for d in driven:
         # first try to disconnect
@@ -926,6 +1407,9 @@ def _update_driven(driver):
 ####################################
 
 class simpleRigUI(QtWidgets.QMainWindow, srUI.Ui_MainWindow):
+
+    """UI dialog
+    """
 
     def __init__(self, parent=None):
         super(simpleRigUI, self).__init__(parent)
@@ -979,6 +1463,12 @@ class simpleRigTool(MayaQWidgetDockableMixin, QtWidgets.QDialog):
         self.srUIInst.deleteRig_action.triggered.connect(self.delete_rig)
         self.srUIInst.autoBuild_action.triggered.connect(self.auto_rig)
         self.srUIInst.export_action.triggered.connect(self.export_config)
+        self.srUIInst.import_action.triggered.connect(self.import_config)
+        # Shifter
+        self.srUIInst.convertToShifterRig_action.triggered.connect(
+            self.shifter_rig)
+        self.srUIInst.createShifterGuide_action.triggered.connect(
+            self.shifter_guide)
 
         # Misc
         self.srUIInst.rootName_lineEdit.textChanged.connect(
@@ -989,6 +1479,12 @@ class simpleRigTool(MayaQWidgetDockableMixin, QtWidgets.QDialog):
     # ==============================================
     # Slots ========================================
     # ==============================================
+
+    def shifter_rig(self):
+        convert_to_shifter_rig()
+
+    def shifter_guide(self):
+        convert_to_shifter_guide()
 
     def rootName_text_changed(self):
         name = _validate_name(self.srUIInst.rootName_lineEdit.text())
@@ -1116,12 +1612,15 @@ class simpleRigTool(MayaQWidgetDockableMixin, QtWidgets.QDialog):
     def export_config(self):
         export_configuration()
 
+    def import_config(self):
+        import_configuration()
 
-def open(*args):
+
+def openSimpleRigUI(*args):
     pyqt.showDialog(simpleRigTool)
 ####################################
 
 
 if __name__ == "__main__":
 
-    open()
+    openSimpleRigUI()
