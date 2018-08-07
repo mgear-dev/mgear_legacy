@@ -206,9 +206,9 @@ def attributeChangedCB(callback_name, func, node, attributes):
     """
     m_node = getMObject(node)
     attrMan = AttributeChangedManager(m_node, attributes, func)
-    attrManFunc = attrMan.attributeChanged
+    managerFunc = attrMan.attributeChanged
     callback_id = om.MNodeMessage.addAttributeChangedCallback(m_node,
-                                                              attrManFunc)
+                                                              managerFunc)
     return callback_id
 
 
@@ -240,6 +240,23 @@ def timeChangedCB(callback_name, func):
         long: maya id to created callback
     """
     callback_id = om.MDGMessage.addTimeChangeCallback(func)
+    return callback_id
+
+
+@registerSessionCB
+def userTimeChangedCB(callback_name, func):
+    """Callback triggers during user timeChange, skips PLAYBACK
+
+    Args:
+        callback_name (str): name you want to assign cb
+        func (function): will be called upon
+
+    Returns:
+        long: maya id to created callback
+    """
+    timeManager = UserTimeChangedManager(func)
+    managerFunc = timeManager.userTimeChanged
+    callback_id = om.MDGMessage.addTimeChangeCallback(managerFunc)
     return callback_id
 
 
@@ -290,6 +307,28 @@ class AttributeChangedManager(object):
 
         if plug1.partialName() in self.attributes:
             self.func()
+
+
+class UserTimeChangedManager(object):
+
+    """mini class that will be called upon when timeChanged callback is run
+    this will check to see if playback is active, if so BREAK
+
+    Attributes:
+        attributes (list): [tx, ty] of SHORT NAMED attrs to monitor
+        func (function): to call when criteria met
+        m_node (om.MOBJECT): mobject
+    """
+
+    def __init__(self, func):
+        self.func = func
+
+    def userTimeChanged(self, *args):
+        """Check if playback is active, if so return without calling func
+        """
+        if om.MConditionMessage.getConditionState("playingBack"):
+            return
+        self.func(*args)
 
 
 class CallbackManager(object):
@@ -426,4 +465,9 @@ class CallbackManager(object):
     @registerManagerCB
     def timeChangedCB(self, callback_name, func):
         callback_id = timeChangedCB(callback_name, func)
+        return callback_id
+
+    @registerManagerCB
+    def userTimeChangedCB(self, callback_name, func):
+        callback_id = userTimeChangedCB(callback_name, func)
         return callback_id
