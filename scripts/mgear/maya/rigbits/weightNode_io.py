@@ -123,7 +123,7 @@ def loadWeightPlugin(dependentFunc):
     try:
         pm.loadPlugin("weightDriver", qt=True)
     except RuntimeError:
-        pm.displayWarning("RBF Manager couldn't found any valid RBF solver.")
+        pm.displayWarning("RBF Manager couldn't find a valid RBF solver.")
 
     return dependentFunc
 
