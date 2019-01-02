@@ -36,8 +36,23 @@ import pymel.core as pm
 
 import mgear.maya.utils as mUtils
 
+# =============================================================================
+# constants
+# =============================================================================
+
+# nodes to check for multiple drivers
 SDK_UTILITY_TYPE = ("blendWeighted",)
+
+# currently supported animNodes type, SDK anim nodes
 SDK_ANIMCURVES_TYPE = ("animCurveUA", "animCurveUL", "animCurveUU")
+
+# TODO
+# effectively the supported node types we can collected sdk info on
+DESTINATION_TYPES = [SDK_UTILITY_TYPE[0],
+                     "transform",
+                     "blendShape",
+                     "joint",
+                     "mesh"]
 
 
 # ==============================================================================
@@ -101,25 +116,26 @@ def getPynodes(nodes):
 # sdk functions
 # ==============================================================================
 
-def getSDKDestination(animNodeOutputPlug):
+def getSDKDestination(animNodeOutputPlug, destinationTypes=DESTINATION_TYPES):
     """Get the final destination of the sdk node, skips blendweighted
     and conversion node to get the transform node.
     TODO: Open this up to provided type destination
-    
+
     Args:
         animNodeOutputPlug (string): animationNode.output
-    
+
     Returns:
         list: name of the node, and attr
     """
-    connectionTypes = [SDK_UTILITY_TYPE[0], "transform"]
+
     targetDrivenAttr = pm.listConnections(animNodeOutputPlug,
                                           source=False,
                                           destination=True,
                                           plugs=True,
-                                          type=connectionTypes,
+                                          type=destinationTypes,
                                           scn=True)
-    if pm.nodeType(targetDrivenAttr[0].nodeName()) == "blendWeighted":
+    if (targetDrivenAttr and pm.nodeType(targetDrivenAttr[0].nodeName()) ==
+        "blendWeighted"):
         blendNodeOutAttr = targetDrivenAttr[0].node().attr("output")
         targetDrivenAttr = pm.listConnections(blendNodeOutAttr,
                                               destination=True,
@@ -228,6 +244,9 @@ def getSDKInfo(animNode):
 
     animNodeOutputPlug = "{0}.output".format(animNode.nodeName())
     drivenNode, drivenAttr = getSDKDestination(animNodeOutputPlug)
+    if pm.nodeType(drivenNode) == "blendShape":
+        tmp_blendPlug = pm.PyNode("{}.{}".format(drivenNode, drivenAttr))
+        drivenAttr = tmp_blendPlug.getAlias() or drivenAttr
     sdkInfo_dict["drivenNode"] = drivenNode
     sdkInfo_dict["drivenAttr"] = drivenAttr
 
@@ -410,7 +429,7 @@ def getBlendNodes(attrPlug):
 
     Returns:
         string: node.attr of the blendweighted node that was just created or
-        existing 
+        existing
     """
     # check what the connection type is
     blendNode = pm.listConnections(attrPlug, scn=True)
@@ -473,11 +492,17 @@ def createSDKFromDict(sdkInfo_dict):
     return sdkNode
 
 
+# =============================================================================
+# the actual I/O
+# =============================================================================
+
+
 def exportSDKs(nodes, filePath):
     """exports the sdk information based on the provided nodes to a json file
 
     Args:
-        nodes (list): of nodes to export
+        nodes (list): of the nodes being DRIVEN BY THE SDK's
+        This is get sdks from the provided nodes and export those
         filePath (string): full filepath to export jsons to
     """
     sdksToExport_dict = {}
