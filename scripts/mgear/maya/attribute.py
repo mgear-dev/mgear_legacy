@@ -50,7 +50,7 @@ def addAttribute(node,
         str: The long name of the new attribute
     """
     if node.hasAttr(longName):
-        mgear.log("Attribute already exists", mgear.error)
+        mgear.log("Attribute already exists", mgear.sev_error)
         return
 
     data = {}
